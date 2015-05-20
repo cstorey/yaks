@@ -1,0 +1,4 @@
+[package]
+name = "yak-mq"
+version = "0.1.0"
+authors = ["cez"]
