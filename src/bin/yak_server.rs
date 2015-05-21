@@ -48,6 +48,11 @@ pub fn main() {
 fn process_requests<Id: fmt::Display, S: Read + Write>(id: Id, mut strm: BufStream<S>) -> Result<(), ServerError> {
   loop {
     debug!("{}: Waiting for message", id);
+    let len = try!(strm.fill_buf()).len();
+    if len == 0 {
+        debug!("{}: End of client stream", id);
+        return Ok(())
+    }
     let message_reader = try!(serialize_packed::read_message(&mut strm, ReaderOptions::new()));
     let msg = try!(message_reader.get_root::<client_request::Reader>());
     debug!("{}: Read message", id);
