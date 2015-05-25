@@ -10,6 +10,7 @@ use std::thread;
 use std::io::{self,Read,Write,BufStream,BufRead};
 use std::str::FromStr;
 use std::fmt;
+use std::sync::{Arc,Mutex};
 use std::collections::HashMap;
 
 use capnp::serialize_packed;
@@ -19,32 +20,33 @@ use yak_client::yak_capnp::*;
 
 type Key = Vec<u8>;
 type Values = Vec<Vec<u8>>;
-struct MemStore (HashMap<Key, Values>);
+struct MemStore (Arc<Mutex<HashMap<Key, Values>>>);
 
 trait Store {
-  fn truncate(&mut self);
+  fn truncate(&self);
   fn read(&self, key: &[u8]) -> Values;
-  fn write(&mut self, key: &[u8], val: &[u8]);
+  fn write(&self, key: &[u8], val: &[u8]);
 }
 
 impl MemStore {
   fn new() -> MemStore {
-    MemStore(HashMap::new())
+    MemStore(Arc::new(Mutex::new(HashMap::new())))
   }
 }
 
 impl Store for MemStore {
-  fn truncate(&mut self) {
-    let MemStore(ref mut map) = *self;
+  fn truncate(&self) {
+    let mut guard = self.0.lock().unwrap();
+    let ref mut map = guard;
     map.clear();
   }
 
   fn read(&self, key: &[u8]) -> Values {
-    let MemStore(ref map) = *self;
+    let map = self.0.lock().unwrap();
     map.get(key).map(|x| x.clone()).unwrap_or(vec![])
   }
-  fn write(&mut self, key: &[u8], val: &[u8]) {
-    let MemStore(ref mut map) = *self;
+  fn write(&self, key: &[u8], val: &[u8]) {
+    let mut map = self.0.lock().unwrap();
     let entry = map.entry(key.into()).or_insert(vec![]);
     entry.push(val.into())
   }
