@@ -55,13 +55,15 @@ impl Client {
     Ok(Client { connection: BufStream::new(sock) })
   }
 
+  fn encode_truncate<B: MessageBuilder>(message: &mut B) {
+    let mut rec = message.init_root::<client_request::Builder>();
+    rec.set_truncate(())
+  }
+
   pub fn truncate(&mut self) -> Result<(), YakError> {
     let mut message = MallocMessageBuilder::new_default();
-    {
-      let mut rec = message.init_root::<client_request::Builder>();
-      rec.set_truncate(())
-    }
-    serialize_packed::write_message(&mut self.connection, &mut message).unwrap();
+    Self::encode_truncate(&mut message);
+    try!(serialize_packed::write_message(&mut self.connection, &mut message));
     try!(self.connection.flush());
     debug!("Waiting for response");
 
@@ -70,17 +72,19 @@ impl Client {
     debug!("Got response");
 
     Ok(())
+  }
+
+  fn encode_write<B: MessageBuilder>(message: &mut B, key: &[u8], val: &[u8]) {
+    let mut rec = message.init_root::<client_request::Builder>();
+    let mut req = rec.init_write();
+    req.set_key(key);
+    req.set_value(val);
   }
 
   pub fn write(&mut self, key: &[u8], val: &[u8]) -> Result<(), YakError> {
     let mut message = MallocMessageBuilder::new_default();
-    {
-      let mut rec = message.init_root::<client_request::Builder>();
-      let mut req = rec.init_write();
-      req.set_key(key);
-      req.set_value(val);
-    }
-    serialize_packed::write_message(&mut self.connection, &mut message).unwrap();
+    Self::encode_write(&mut message, key, val);
+    try!(serialize_packed::write_message(&mut self.connection, &mut message));
     try!(self.connection.flush());
     debug!("Waiting for response");
 
@@ -91,14 +95,16 @@ impl Client {
     Ok(())
   }
 
-  pub fn read(&mut self, key: &[u8]) -> Result<Vec<Datum>, YakError> {
-    let mut message = MallocMessageBuilder::new_default();
-    {
+  fn encode_read<B: MessageBuilder>(message: &mut B, key: &[u8]) {
       let mut rec = message.init_root::<client_request::Builder>();
       let mut req = rec.init_read();
       req.set_key(key)
-    }
-    serialize_packed::write_message(&mut self.connection, &mut message).unwrap();
+  }
+
+  pub fn read(&mut self, key: &[u8]) -> Result<Vec<Datum>, YakError> {
+    let mut message = MallocMessageBuilder::new_default();
+    Self::encode_read(&mut message, key);
+    try!(serialize_packed::write_message(&mut self.connection, &mut message));
     try!(self.connection.flush());
     debug!("Waiting for response");
 
