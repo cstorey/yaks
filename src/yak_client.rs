@@ -60,39 +60,11 @@ impl Client {
     rec.set_truncate(())
   }
 
-  pub fn truncate(&mut self) -> Result<(), YakError> {
-    let mut message = MallocMessageBuilder::new_default();
-    Self::encode_truncate(&mut message);
-    try!(serialize_packed::write_message(&mut self.connection, &mut message));
-    try!(self.connection.flush());
-    debug!("Waiting for response");
-
-    let message_reader = try!(serialize_packed::read_message(&mut self.connection, ReaderOptions::new()));
-    let msg = try!(message_reader.get_root::<client_response::Reader>());
-    debug!("Got response");
-
-    Ok(())
-  }
-
   fn encode_write<B: MessageBuilder>(message: &mut B, key: &[u8], val: &[u8]) {
     let mut rec = message.init_root::<client_request::Builder>();
     let mut req = rec.init_write();
     req.set_key(key);
     req.set_value(val);
-  }
-
-  pub fn write(&mut self, key: &[u8], val: &[u8]) -> Result<(), YakError> {
-    let mut message = MallocMessageBuilder::new_default();
-    Self::encode_write(&mut message, key, val);
-    try!(serialize_packed::write_message(&mut self.connection, &mut message));
-    try!(self.connection.flush());
-    debug!("Waiting for response");
-
-    let message_reader = try!(serialize_packed::read_message(&mut self.connection, ReaderOptions::new()));
-    let msg = try!(message_reader.get_root::<client_response::Reader>());
-    debug!("Got response");
-
-    Ok(())
   }
 
   fn encode_read<B: MessageBuilder>(message: &mut B, key: &[u8]) {
@@ -101,14 +73,16 @@ impl Client {
       req.set_key(key)
   }
 
-  pub fn read(&mut self, key: &[u8]) -> Result<Vec<Datum>, YakError> {
-    let mut message = MallocMessageBuilder::new_default();
-    Self::encode_read(&mut message, key);
-    try!(serialize_packed::write_message(&mut self.connection, &mut message));
-    try!(self.connection.flush());
-    debug!("Waiting for response");
+  fn expect_ok<R: MessageReader>(message: &R) -> Result<(), YakError> {
+    let msg = try!(message.get_root::<client_response::Reader>());
+    debug!("Got response");
+    match try!(msg.which()) {
+      client_response::Ok(()) => Ok(()),
+      other => Err(YakError::ProtocolError)
+    }
+  }
 
-    let message_reader = try!(serialize_packed::read_message(&mut self.connection, ReaderOptions::new()));
+  fn expect_datum_list<R: MessageReader>(message_reader: &R) -> Result<Vec<Datum>, YakError> {
     let msg = try!(message_reader.get_root::<client_response::Reader>());
     match try!(msg.which()) {
       client_response::OkData(d) => {
@@ -123,7 +97,39 @@ impl Client {
       },
       other => Err(YakError::ProtocolError)
     }
+  }
 
+  pub fn truncate(&mut self) -> Result<(), YakError> {
+    let mut message = MallocMessageBuilder::new_default();
+    Self::encode_truncate(&mut message);
+    try!(serialize_packed::write_message(&mut self.connection, &mut message));
+    try!(self.connection.flush());
+    debug!("Waiting for response");
+
+    let message_reader = try!(serialize_packed::read_message(&mut self.connection, ReaderOptions::new()));
+    Self::expect_ok(&message_reader)
+  }
+
+  pub fn write(&mut self, key: &[u8], val: &[u8]) -> Result<(), YakError> {
+    let mut message = MallocMessageBuilder::new_default();
+    Self::encode_write(&mut message, key, val);
+    try!(serialize_packed::write_message(&mut self.connection, &mut message));
+    try!(self.connection.flush());
+    debug!("Waiting for response");
+
+    let message_reader = try!(serialize_packed::read_message(&mut self.connection, ReaderOptions::new()));
+    Self::expect_ok(&message_reader)
+  }
+
+  pub fn read(&mut self, key: &[u8]) -> Result<Vec<Datum>, YakError> {
+    let mut message = MallocMessageBuilder::new_default();
+    Self::encode_read(&mut message, key);
+    try!(serialize_packed::write_message(&mut self.connection, &mut message));
+    try!(self.connection.flush());
+    debug!("Waiting for response");
+
+    let message_reader = try!(serialize_packed::read_message(&mut self.connection, ReaderOptions::new()));
+    Self::expect_datum_list(&message_reader)
   }
 }
 
