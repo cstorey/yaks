@@ -73,35 +73,33 @@ fn process_requests<Id: fmt::Display, S: Read + Write>(id: Id, mut strm: BufStre
   }
 }
 
-fn truncate<Id: fmt::Display>(id: &Id, store: &mut HashMap<Vec<u8>, Vec<u8>>, v: (), mut response: client_response::Builder) -> Result<(), ServerError> {
+fn truncate<Id: fmt::Display>(id: &Id, store: &mut HashMap<Vec<u8>, Vec<Vec<u8>>>, v: (), mut response: client_response::Builder) -> Result<(), ServerError> {
   info!("{}: truncate:{:?}", id, v);
   store.clear();
   response.set_ok(());
   Ok(())
 }
 
-fn read<Id: fmt::Display>(id: &Id, store: &mut HashMap<Vec<u8>, Vec<u8>>, req: read_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+fn read<Id: fmt::Display>(id: &Id, store: &mut HashMap<Vec<u8>, Vec<Vec<u8>>>, req: read_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
   let key = try!(req.get_key()).into();
-  info!("{}: read:{:?}", id, key);
-  match store.get(key) {
-    Some(val) => {
-      let mut data = response.init_ok_data(1);
-      let mut datum = data.borrow().get(0);
-      datum.set_value(val)
-    },
-    None => {
-      let mut data = response.init_ok_data(0);
-    }
+  let val = store.get(key).map(|x| x.clone()).unwrap_or(vec![]);
+  info!("{}: read:{:?}: -> {:?}", id, key, val);
+
+  let mut data = response.init_ok_data(val.len() as u32);
+  for i in 0..val.len() {
+    let mut datum = data.borrow().get(i as u32);
+    datum.set_value(&val[i])
   }
   Ok(())
 }
 
-fn write<Id: fmt::Display>(id: &Id, store: &mut HashMap<Vec<u8>, Vec<u8>>, v: write_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+fn write<Id: fmt::Display>(id: &Id, store: &mut HashMap<Vec<u8>, Vec<Vec<u8>>>, v: write_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
   let key = try!(v.get_key()).into();
   let val = try!(v.get_value()).into();
   info!("{}: write:{:?} -> {:?}", id, key, val);
 
-  store.insert(key, val);
+  let entry = store.entry(key).or_insert(vec![]);
+  entry.push(val);
   response.set_ok(());
   Ok(())
 }

@@ -42,6 +42,26 @@ fn test_put_read_single_value() {
 }
 
 #[test]
+fn test_put_read_two_values() {
+  env_logger::init().unwrap_or(());
+  let mut client = open_client();
+  let key = "key";
+  let vals = vec!["a".as_bytes(), "b".as_bytes()];
+
+  client.truncate().unwrap();
+
+  for val in &vals {
+    client.write(key.as_bytes(), &val).unwrap();
+  }
+
+  let resp = client.read(key.as_bytes()).unwrap();
+  let returned : Vec<Vec<u8>> = resp.iter().map(|v| v.content.clone()).collect();
+  assert_eq!(returned, vals);
+}
+
+
+
+#[test]
 fn test_truncate() {
   env_logger::init().unwrap_or(());
   let mut client = open_client();
