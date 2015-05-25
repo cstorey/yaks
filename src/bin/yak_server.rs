@@ -21,11 +21,19 @@ type Key = Vec<u8>;
 type Values = Vec<Vec<u8>>;
 struct MemStore (HashMap<Key, Values>);
 
+trait Store {
+  fn truncate(&mut self);
+  fn read(&self, key: &[u8]) -> Values;
+  fn write(&mut self, key: &[u8], val: &[u8]);
+}
+
 impl MemStore {
   fn new() -> MemStore {
     MemStore(HashMap::new())
   }
+}
 
+impl Store for MemStore {
   fn truncate(&mut self) {
     let MemStore(ref mut map) = *self;
     map.clear();
@@ -98,7 +106,7 @@ fn process_requests<Id: fmt::Display, S: Read + Write>(id: Id, mut strm: BufStre
   }
 }
 
-fn truncate<Id: fmt::Display>(id: &Id, store: &mut MemStore, req: truncate_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+fn truncate<Id: fmt::Display, S: Store>(id: &Id, store: &mut S, req: truncate_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
   let space = try!(req.get_space());
   info!("{}/{:?}: truncate", id, space);
   store.truncate();
@@ -106,7 +114,7 @@ fn truncate<Id: fmt::Display>(id: &Id, store: &mut MemStore, req: truncate_reque
   Ok(())
 }
 
-fn read<Id: fmt::Display>(id: &Id, store: &mut MemStore, req: read_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+fn read<Id: fmt::Display, S: Store>(id: &Id, store: &mut S, req: read_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
   let space = try!(req.get_space());
   let key = try!(req.get_key()).into();
   let val = store.read(key);
@@ -120,7 +128,7 @@ fn read<Id: fmt::Display>(id: &Id, store: &mut MemStore, req: read_request::Read
   Ok(())
 }
 
-fn write<Id: fmt::Display>(id: &Id, store: &mut MemStore, v: write_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+fn write<Id: fmt::Display, S: Store>(id: &Id, store: &mut S, v: write_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
   let space = try!(v.get_space());
   let key = try!(v.get_key()).into();
   let val = try!(v.get_value()).into();
