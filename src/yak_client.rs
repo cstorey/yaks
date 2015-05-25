@@ -57,7 +57,7 @@ impl Client {
 
   fn encode_truncate<B: MessageBuilder>(message: &mut B) {
     let mut rec = message.init_root::<client_request::Builder>();
-    rec.set_truncate(())
+    let mut trunc = rec.init_truncate();
   }
 
   fn encode_write<B: MessageBuilder>(message: &mut B, key: &[u8], val: &[u8]) {

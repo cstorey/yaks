@@ -2,21 +2,26 @@
 
 struct Datum {
   value @0: Data;
-
 }
 
 struct ReadRequest {
-  key @0: Data;
+  space @0: Text;
+  key @1: Data;
 }
 
 struct WriteRequest {
-  key @0: Data;
-  value @1: Data;
+  space @0: Text;
+  key @1: Data;
+  value @2: Data;
+}
+
+struct TruncateRequest {
+  space @0: Text;
 }
 
 struct ClientRequest {
   union {
-    truncate @0 : Void;
+    truncate @0 : TruncateRequest;
     read @1 : ReadRequest;
     write @2 : WriteRequest;
   }

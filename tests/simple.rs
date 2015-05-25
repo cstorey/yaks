@@ -59,8 +59,6 @@ fn test_put_read_two_values() {
   assert_eq!(returned, vals);
 }
 
-
-
 #[test]
 fn test_truncate() {
   env_logger::init().unwrap_or(());

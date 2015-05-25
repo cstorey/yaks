@@ -19,7 +19,28 @@ use yak_client::yak_capnp::*;
 
 type Key = Vec<u8>;
 type Values = Vec<Vec<u8>>;
-struct Store (HashMap<Key, Values>);
+struct MemStore (HashMap<Key, Values>);
+
+impl MemStore {
+  fn new() -> MemStore {
+    MemStore(HashMap::new())
+  }
+
+  fn truncate(&mut self) {
+    let MemStore(ref mut map) = *self;
+    map.clear();
+  }
+
+  fn read(&self, key: &[u8]) -> Values {
+    let MemStore(ref map) = *self;
+    map.get(key).map(|x| x.clone()).unwrap_or(vec![])
+  }
+  fn write(&mut self, key: &[u8], val: &[u8]) {
+    let MemStore(ref mut map) = *self;
+    let entry = map.entry(key.into()).or_insert(vec![]);
+    entry.push(val.into())
+  }
+}
 
 #[derive(Debug)]
 enum ServerError {
@@ -50,7 +71,7 @@ pub fn main() {
 }
 
 fn process_requests<Id: fmt::Display, S: Read + Write>(id: Id, mut strm: BufStream<S>) -> Result<(), ServerError> {
-  let mut store = Store(HashMap::new());
+  let mut store = MemStore::new();
   loop {
     debug!("{}: Waiting for message", id);
     let len = try!(strm.fill_buf()).len();
@@ -66,7 +87,7 @@ fn process_requests<Id: fmt::Display, S: Read + Write>(id: Id, mut strm: BufStre
     {
       let mut response = message.init_root::<client_response::Builder>();
       match try!(msg.which()) {
-        client_request::Truncate(v) => truncate(&id, &mut store, v, response),
+        client_request::Truncate(v) => truncate(&id, &mut store, try!(v), response),
           client_request::Read(v) => read(&id, &mut store, try!(v), response),
           client_request::Write(v) => write(&id, &mut store, try!(v), response),
       };
@@ -77,19 +98,19 @@ fn process_requests<Id: fmt::Display, S: Read + Write>(id: Id, mut strm: BufStre
   }
 }
 
-fn truncate<Id: fmt::Display>(id: &Id, store: &mut Store, v: (), mut response: client_response::Builder) -> Result<(), ServerError> {
-  let Store(ref mut map) = *store;
-  info!("{}: truncate:{:?}", id, v);
-  map.clear();
+fn truncate<Id: fmt::Display>(id: &Id, store: &mut MemStore, req: truncate_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+  let space = try!(req.get_space());
+  info!("{}/{:?}: truncate", id, space);
+  store.truncate();
   response.set_ok(());
   Ok(())
 }
 
-fn read<Id: fmt::Display>(id: &Id, store: &mut Store, req: read_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
-  let Store(ref mut map) = *store;
+fn read<Id: fmt::Display>(id: &Id, store: &mut MemStore, req: read_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+  let space = try!(req.get_space());
   let key = try!(req.get_key()).into();
-  let val = map.get(key).map(|x| x.clone()).unwrap_or(vec![]);
-  info!("{}: read:{:?}: -> {:?}", id, key, val);
+  let val = store.read(key);
+  info!("{}/{:?}: read:{:?}: -> {:?}", id, space, key, val);
 
   let mut data = response.init_ok_data(val.len() as u32);
   for i in 0..val.len() {
@@ -99,14 +120,13 @@ fn read<Id: fmt::Display>(id: &Id, store: &mut Store, req: read_request::Reader,
   Ok(())
 }
 
-fn write<Id: fmt::Display>(id: &Id, store: &mut Store, v: write_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
-  let Store(ref mut map) = *store;
+fn write<Id: fmt::Display>(id: &Id, store: &mut MemStore, v: write_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+  let space = try!(v.get_space());
   let key = try!(v.get_key()).into();
   let val = try!(v.get_value()).into();
-  info!("{}: write:{:?} -> {:?}", id, key, val);
+  info!("{}/{:?}: write:{:?} -> {:?}", id, space, key, val);
 
-  let entry = map.entry(key).or_insert(vec![]);
-  entry.push(val);
+  store.write(key, val);
   response.set_ok(());
   Ok(())
 }
