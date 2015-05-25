@@ -17,6 +17,10 @@ use capnp::{MessageBuilder, MessageReader, MallocMessageBuilder, ReaderOptions};
 
 use yak_client::yak_capnp::*;
 
+type Key = Vec<u8>;
+type Values = Vec<Vec<u8>>;
+struct Store (HashMap<Key, Values>);
+
 #[derive(Debug)]
 enum ServerError {
   CapnpError(capnp::Error),
@@ -46,7 +50,7 @@ pub fn main() {
 }
 
 fn process_requests<Id: fmt::Display, S: Read + Write>(id: Id, mut strm: BufStream<S>) -> Result<(), ServerError> {
-  let mut store = HashMap::new();
+  let mut store = Store(HashMap::new());
   loop {
     debug!("{}: Waiting for message", id);
     let len = try!(strm.fill_buf()).len();
@@ -73,16 +77,18 @@ fn process_requests<Id: fmt::Display, S: Read + Write>(id: Id, mut strm: BufStre
   }
 }
 
-fn truncate<Id: fmt::Display>(id: &Id, store: &mut HashMap<Vec<u8>, Vec<Vec<u8>>>, v: (), mut response: client_response::Builder) -> Result<(), ServerError> {
+fn truncate<Id: fmt::Display>(id: &Id, store: &mut Store, v: (), mut response: client_response::Builder) -> Result<(), ServerError> {
+  let Store(ref mut map) = *store;
   info!("{}: truncate:{:?}", id, v);
-  store.clear();
+  map.clear();
   response.set_ok(());
   Ok(())
 }
 
-fn read<Id: fmt::Display>(id: &Id, store: &mut HashMap<Vec<u8>, Vec<Vec<u8>>>, req: read_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+fn read<Id: fmt::Display>(id: &Id, store: &mut Store, req: read_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+  let Store(ref mut map) = *store;
   let key = try!(req.get_key()).into();
-  let val = store.get(key).map(|x| x.clone()).unwrap_or(vec![]);
+  let val = map.get(key).map(|x| x.clone()).unwrap_or(vec![]);
   info!("{}: read:{:?}: -> {:?}", id, key, val);
 
   let mut data = response.init_ok_data(val.len() as u32);
@@ -93,12 +99,13 @@ fn read<Id: fmt::Display>(id: &Id, store: &mut HashMap<Vec<u8>, Vec<Vec<u8>>>, r
   Ok(())
 }
 
-fn write<Id: fmt::Display>(id: &Id, store: &mut HashMap<Vec<u8>, Vec<Vec<u8>>>, v: write_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+fn write<Id: fmt::Display>(id: &Id, store: &mut Store, v: write_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+  let Store(ref mut map) = *store;
   let key = try!(v.get_key()).into();
   let val = try!(v.get_value()).into();
   info!("{}: write:{:?} -> {:?}", id, key, val);
 
-  let entry = store.entry(key).or_insert(vec![]);
+  let entry = map.entry(key).or_insert(vec![]);
   entry.push(val);
   response.set_ok(());
   Ok(())
