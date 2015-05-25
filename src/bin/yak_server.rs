@@ -32,7 +32,7 @@ pub fn main() {
   let next : Option<String> = a.next();
 
   let listener = TcpListener::bind(local.as_str()).unwrap();
-  info!("listening started, ready to accept");
+  info!("listening started on {}, ready to accept", local);
   for stream in listener.incoming() {
     let next = next.clone();
     thread::spawn(move || {
