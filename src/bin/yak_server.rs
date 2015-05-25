@@ -18,14 +18,16 @@ use capnp::{MessageBuilder, MessageReader, MallocMessageBuilder, ReaderOptions};
 
 use yak_client::yak_capnp::*;
 
-type Key = Vec<u8>;
-type Values = Vec<Vec<u8>>;
+type Key = (String, Vec<u8>);
+type Val = Vec<u8>;
+type Values = Vec<Val>;
+#[derive(Debug,Clone)]
 struct MemStore (Arc<Mutex<HashMap<Key, Values>>>);
 
 trait Store {
-  fn truncate(&self);
-  fn read(&self, key: &[u8]) -> Values;
-  fn write(&self, key: &[u8], val: &[u8]);
+  fn truncate(&self, space: &str);
+  fn read(&self, space: &str, key: &[u8]) -> Values;
+  fn write(&self, space: &str, key: &[u8], val: &[u8]);
 }
 
 impl MemStore {
@@ -35,19 +37,23 @@ impl MemStore {
 }
 
 impl Store for MemStore {
-  fn truncate(&self) {
-    let mut guard = self.0.lock().unwrap();
-    let ref mut map = guard;
-    map.clear();
+  fn truncate(&self, space: &str) {
+    let mut map = self.0.lock().unwrap();
+    let to_rm = map.keys().filter(|k| k.0 == space).map(|k| k.clone()).collect::<Vec<_>>();
+    for k in to_rm {
+      map.remove(&k);
+    }
   }
 
-  fn read(&self, key: &[u8]) -> Values {
+  fn read(&self, space: &str, key: &[u8]) -> Values {
     let map = self.0.lock().unwrap();
-    map.get(key).map(|x| x.clone()).unwrap_or(vec![])
+    let k = (space.into(), key.into());
+    map.get(&k).map(|x| x.clone()).unwrap_or(vec![])
   }
-  fn write(&self, key: &[u8], val: &[u8]) {
+  fn write(&self, space: &str, key: &[u8], val: &[u8]) {
     let mut map = self.0.lock().unwrap();
-    let entry = map.entry(key.into()).or_insert(vec![]);
+    let k = (space.into(), key.into());
+    let entry = map.entry(k).or_insert(vec![]);
     entry.push(val.into())
   }
 }
@@ -68,20 +74,21 @@ pub fn main() {
 
   let listener = TcpListener::bind(local.as_str()).unwrap();
   info!("listening started on {}, ready to accept", local);
+  let mut store = MemStore::new();
   for stream in listener.incoming() {
     let next = next.clone();
+    let store = store.clone();
     thread::spawn(move || {
 	let mut sock = &stream.unwrap();
 	let peer = sock.peer_addr().unwrap();
 	info!("Accept stream from {:?}", peer);
         let mut strm = BufStream::new(sock);
-        process_requests(peer, strm).unwrap()
+        process_requests(peer, strm, store).unwrap()
       });
   }
 }
 
-fn process_requests<Id: fmt::Display, S: Read + Write>(id: Id, mut strm: BufStream<S>) -> Result<(), ServerError> {
-  let mut store = MemStore::new();
+fn process_requests<Id: fmt::Display, S: Read + Write, ST:Store>(id: Id, mut strm: BufStream<S>, store: ST) -> Result<(), ServerError> {
   loop {
     debug!("{}: Waiting for message", id);
     let len = try!(strm.fill_buf()).len();
@@ -97,9 +104,9 @@ fn process_requests<Id: fmt::Display, S: Read + Write>(id: Id, mut strm: BufStre
     {
       let mut response = message.init_root::<client_response::Builder>();
       match try!(msg.which()) {
-        client_request::Truncate(v) => truncate(&id, &mut store, try!(v), response),
-          client_request::Read(v) => read(&id, &mut store, try!(v), response),
-          client_request::Write(v) => write(&id, &mut store, try!(v), response),
+        client_request::Truncate(v) => truncate(&id, &store, try!(v), response),
+          client_request::Read(v) => read(&id, &store, try!(v), response),
+          client_request::Write(v) => write(&id, &store, try!(v), response),
       };
     }
 
@@ -108,18 +115,18 @@ fn process_requests<Id: fmt::Display, S: Read + Write>(id: Id, mut strm: BufStre
   }
 }
 
-fn truncate<Id: fmt::Display, S: Store>(id: &Id, store: &mut S, req: truncate_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+fn truncate<Id: fmt::Display, S: Store>(id: &Id, store: &S, req: truncate_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
   let space = try!(req.get_space());
   info!("{}/{:?}: truncate", id, space);
-  store.truncate();
+  store.truncate(space);
   response.set_ok(());
   Ok(())
 }
 
-fn read<Id: fmt::Display, S: Store>(id: &Id, store: &mut S, req: read_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+fn read<Id: fmt::Display, S: Store>(id: &Id, store: &S, req: read_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
   let space = try!(req.get_space());
   let key = try!(req.get_key()).into();
-  let val = store.read(key);
+  let val = store.read(space, key);
   info!("{}/{:?}: read:{:?}: -> {:?}", id, space, key, val);
 
   let mut data = response.init_ok_data(val.len() as u32);
@@ -130,13 +137,13 @@ fn read<Id: fmt::Display, S: Store>(id: &Id, store: &mut S, req: read_request::R
   Ok(())
 }
 
-fn write<Id: fmt::Display, S: Store>(id: &Id, store: &mut S, v: write_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+fn write<Id: fmt::Display, S: Store>(id: &Id, store: &S, v: write_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
   let space = try!(v.get_space());
   let key = try!(v.get_key()).into();
   let val = try!(v.get_value()).into();
   info!("{}/{:?}: write:{:?} -> {:?}", id, space, key, val);
 
-  store.write(key, val);
+  store.write(space, key, val);
   response.set_ok(());
   Ok(())
 }
