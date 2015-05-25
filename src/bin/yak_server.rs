@@ -79,73 +79,85 @@ pub fn main() {
     let next = next.clone();
     let store = store.clone();
     thread::spawn(move || {
-	let mut sock = &stream.unwrap();
+	let mut sock = stream.unwrap();
 	let peer = sock.peer_addr().unwrap();
 	info!("Accept stream from {:?}", peer);
-        let mut strm = BufStream::new(sock);
-        process_requests(peer, strm, store).unwrap()
+        Session::new(peer, sock, store).process_requests().unwrap()
       });
   }
 }
 
-fn process_requests<Id: fmt::Display, S: Read + Write, ST:Store>(id: Id, mut strm: BufStream<S>, store: ST) -> Result<(), ServerError> {
-  loop {
-    debug!("{}: Waiting for message", id);
-    let len = try!(strm.fill_buf()).len();
-    if len == 0 {
-        debug!("{}: End of client stream", id);
-        return Ok(())
-    }
-    let message_reader = try!(serialize_packed::read_message(&mut strm, ReaderOptions::new()));
-    let msg = try!(message_reader.get_root::<client_request::Reader>());
-    debug!("{}: Read message", id);
+struct Session<Id, S:Write, ST> {
+  id: Id,
+  strm: BufStream<S>,
+  store: ST
+}
 
-    let mut message = MallocMessageBuilder::new_default();
-    {
-      let mut response = message.init_root::<client_response::Builder>();
-      match try!(msg.which()) {
-        client_request::Truncate(v) => truncate(&id, &store, try!(v), response),
-          client_request::Read(v) => read(&id, &store, try!(v), response),
-          client_request::Write(v) => write(&id, &store, try!(v), response),
-      };
-    }
 
-    try!(serialize_packed::write_message(&mut strm, &mut message));
-    try!(strm.flush())
+impl<Id: fmt::Display, S: Read + Write, ST:Store> Session<Id, S, ST> {
+  fn new(id: Id, sock: S, store: ST) -> Session<Id, S, ST> {
+    let mut strm = BufStream::new(sock);
+    Session { id: id, strm:strm, store: store }
   }
-}
+  fn process_requests(&mut self) -> Result<(), ServerError> {
+    loop {
+      debug!("{}: Waiting for message", self.id);
+      let len = try!(self.strm.fill_buf()).len();
+      if len == 0 {
+          debug!("{}: End of client stream", self.id);
+          return Ok(())
+      }
+      let message_reader = try!(serialize_packed::read_message(&mut self.strm, ReaderOptions::new()));
+      let msg = try!(message_reader.get_root::<client_request::Reader>());
+      debug!("{}: Read message", self.id);
 
-fn truncate<Id: fmt::Display, S: Store>(id: &Id, store: &S, req: truncate_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
-  let space = try!(req.get_space());
-  info!("{}/{:?}: truncate", id, space);
-  store.truncate(space);
-  response.set_ok(());
-  Ok(())
-}
+      let mut message = MallocMessageBuilder::new_default();
+      {
+        let mut response = message.init_root::<client_response::Builder>();
+        match try!(msg.which()) {
+          client_request::Truncate(v) => self.truncate(try!(v), response),
+          client_request::Read(v) => self.read(try!(v), response),
+          client_request::Write(v) => self.write(try!(v), response),
+        };
+      }
 
-fn read<Id: fmt::Display, S: Store>(id: &Id, store: &S, req: read_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
-  let space = try!(req.get_space());
-  let key = try!(req.get_key()).into();
-  let val = store.read(space, key);
-  info!("{}/{:?}: read:{:?}: -> {:?}", id, space, key, val);
-
-  let mut data = response.init_ok_data(val.len() as u32);
-  for i in 0..val.len() {
-    let mut datum = data.borrow().get(i as u32);
-    datum.set_value(&val[i])
+      try!(serialize_packed::write_message(&mut self.strm, &mut message));
+      try!(self.strm.flush())
+    }
   }
-  Ok(())
-}
 
-fn write<Id: fmt::Display, S: Store>(id: &Id, store: &S, v: write_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
-  let space = try!(v.get_space());
-  let key = try!(v.get_key()).into();
-  let val = try!(v.get_value()).into();
-  info!("{}/{:?}: write:{:?} -> {:?}", id, space, key, val);
+  fn truncate(&self, req: truncate_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+    let space = try!(req.get_space());
+    info!("{}/{:?}: truncate", self.id, space);
+    self.store.truncate(space);
+    response.set_ok(());
+    Ok(())
+  }
 
-  store.write(space, key, val);
-  response.set_ok(());
-  Ok(())
+  fn read(&self, req: read_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+    let space = try!(req.get_space());
+    let key = try!(req.get_key()).into();
+    let val = self.store.read(space, key);
+    info!("{}/{:?}: read:{:?}: -> {:?}", self.id, space, key, val);
+
+    let mut data = response.init_ok_data(val.len() as u32);
+    for i in 0..val.len() {
+      let mut datum = data.borrow().get(i as u32);
+      datum.set_value(&val[i])
+    }
+    Ok(())
+  }
+
+  fn write(&self, v: write_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
+    let space = try!(v.get_space());
+    let key = try!(v.get_key()).into();
+    let val = try!(v.get_value()).into();
+    info!("{}/{:?}: write:{:?} -> {:?}", self.id, space, key, val);
+
+    self.store.write(space, key, val);
+    response.set_ok(());
+    Ok(())
+  }
 }
 
 impl From<capnp::Error> for ServerError {
