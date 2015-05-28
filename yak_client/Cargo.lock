@@ -1,5 +1,5 @@
 [root]
-name = "yak-mq"
+name = "yak_client"
 version = "0.1.0"
 dependencies = [
  "capnp 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -7,12 +7,11 @@ dependencies = [
  "env_logger 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "url 0.2.34 (registry+https://github.com/rust-lang/crates.io-index)",
- "yak_client 0.1.0",
 ]
 
 [[package]]
 name = "byteorder"
-version = "0.3.9"
+version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -20,7 +19,7 @@ name = "capnp"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "byteorder 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)",
+ "byteorder 0.3.10 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -37,7 +36,7 @@ version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "log 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "regex 0.1.30 (registry+https://github.com/rust-lang/crates.io-index)",
+ "regex 0.1.32 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -60,7 +59,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "regex"
-version = "0.1.30"
+version = "0.1.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "regex-syntax 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "regex-syntax"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -75,16 +82,5 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "matches 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustc-serialize 0.3.14 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "yak_client"
-version = "0.1.0"
-dependencies = [
- "capnp 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "capnpc 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "env_logger 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "log 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "url 0.2.34 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 

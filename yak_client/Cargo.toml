@@ -1,17 +1,14 @@
 [package]
-name = "yak-mq"
+name = "yak_client"
 version = "0.1.0"
 authors = ["cez"]
+build = "build.rs"
 
-[[bin]]
-name = "yak_server"
-path = "src/main.rs"
+[lib]
+name = "yak_client"
 
 [build-dependencies]
 capnpc = "^0.2.0"
-
-[dependencies.yak_client]
-path = "./yak_client"
 
 [dependencies]
 url = "0.2.34"
