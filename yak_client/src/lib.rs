@@ -137,11 +137,17 @@ impl Client {
     }
   }
 
-  pub fn truncate(&mut self) -> Result<(), YakError> {
+  fn send(&mut self, req: Request) -> Result<(), YakError> {
     let mut message = MallocMessageBuilder::new_default();
-    Request::truncate(&self.space).encode(&mut message);
+    req.encode(&mut message);
     try!(serialize_packed::write_message(&mut self.connection, &mut message));
     try!(self.connection.flush());
+    Ok(())
+  }
+
+  pub fn truncate(&mut self) -> Result<(), YakError> {
+    let req = Request::truncate(&self.space);
+    self.send(req);
     debug!("Waiting for response");
 
     let message_reader = try!(serialize_packed::read_message(&mut self.connection, ReaderOptions::new()));
@@ -149,10 +155,8 @@ impl Client {
   }
 
   pub fn write(&mut self, key: &[u8], val: &[u8]) -> Result<(), YakError> {
-    let mut message = MallocMessageBuilder::new_default();
-    Request::write(&self.space, key, val).encode(&mut message);
-    try!(serialize_packed::write_message(&mut self.connection, &mut message));
-    try!(self.connection.flush());
+    let req = Request::write(&self.space, key, val);
+    self.send(req);
     debug!("Waiting for response");
 
     let message_reader = try!(serialize_packed::read_message(&mut self.connection, ReaderOptions::new()));
@@ -160,10 +164,8 @@ impl Client {
   }
 
   pub fn read(&mut self, key: &[u8]) -> Result<Vec<Datum>, YakError> {
-    let mut message = MallocMessageBuilder::new_default();
-    Request::read(&self.space, key).encode(&mut message);
-    try!(serialize_packed::write_message(&mut self.connection, &mut message));
-    try!(self.connection.flush());
+    let req = Request::read(&self.space, key);
+    self.send(req);
     debug!("Waiting for response");
 
     let message_reader = try!(serialize_packed::read_message(&mut self.connection, ReaderOptions::new()));
