@@ -35,7 +35,7 @@ pub enum YakError {
   ProtocolError
 }
 
-#[derive(PartialEq,Eq,PartialOrd,Ord,Debug)]
+#[derive(PartialEq,Eq,PartialOrd,Ord,Debug, Clone)]
 pub struct Datum {
   pub content: Vec<u8>
 }
@@ -91,8 +91,43 @@ impl Request {
       req.set_space(space);
       req.set_key(key)
   }
+}
 
+pub enum Response {
+  Okay,
+  OkayData(Vec<Datum>)
+}
 
+impl Response {
+  fn decode<R: MessageReader>(message: &R) -> Result<Response, YakError> {
+    let msg = try!(message.get_root::<client_response::Reader>());
+    match try!(msg.which()) {
+      client_response::Ok(()) => Ok(Response::Okay),
+      client_response::OkData(d) => {
+        debug!("Got response Data: ");
+        let mut data = Vec::with_capacity(try!(d).len() as usize);
+        for it in try!(d).iter() {
+          let val : Vec<u8> = try!(it.get_value()).iter().map(|v|v.clone()).collect();
+          data.push(Datum { content: val });
+        }
+        Ok(Response::OkayData(data))
+      }
+    }
+  }
+
+  pub fn expect_ok(&self) -> Result<(), YakError> {
+    match self {
+      &Response::Okay => Ok(()),
+      &Response::OkayData(_) => Err(YakError::ProtocolError)
+    }
+  }
+
+  pub fn expect_datum_list(&self) -> Result<Vec<Datum>, YakError> {
+    match self {
+      &Response::OkayData(ref result) => Ok(result.clone()),
+      &Response::Okay => Err(YakError::ProtocolError)
+    }
+  }
 }
 
 impl Client {
@@ -145,22 +180,26 @@ impl Client {
     Ok(())
   }
 
+  fn read_response(&mut self) -> Result<Response,YakError> {
+    let message_reader =
+      try!(serialize_packed::read_message(
+	&mut self.connection, ReaderOptions::new()));
+    let resp = try!(Response::decode(&message_reader));
+    Ok(resp)
+  }
+
   pub fn truncate(&mut self) -> Result<(), YakError> {
     let req = Request::truncate(&self.space);
     try!(self.send(req));
     debug!("Waiting for response");
-
-    let message_reader = try!(serialize_packed::read_message(&mut self.connection, ReaderOptions::new()));
-    Self::expect_ok(&message_reader)
+    try!(self.read_response()).expect_ok()
   }
 
   pub fn write(&mut self, key: &[u8], val: &[u8]) -> Result<(), YakError> {
     let req = Request::write(&self.space, key, val);
     try!(self.send(req));
     debug!("Waiting for response");
-
-    let message_reader = try!(serialize_packed::read_message(&mut self.connection, ReaderOptions::new()));
-    Self::expect_ok(&message_reader)
+    try!(self.read_response()).expect_ok()
   }
 
   pub fn read(&mut self, key: &[u8]) -> Result<Vec<Datum>, YakError> {
@@ -168,8 +207,7 @@ impl Client {
     try!(self.send(req));
     debug!("Waiting for response");
 
-    let message_reader = try!(serialize_packed::read_message(&mut self.connection, ReaderOptions::new()));
-    Self::expect_datum_list(&message_reader)
+    try!(self.read_response()).expect_datum_list()
   }
 }
 
