@@ -40,20 +40,35 @@ pub struct Datum {
   pub content: Vec<u8>
 }
 
-impl Client {
-  pub fn connect(loc: &str) -> Result<Client, YakError> {
-    let mut p = UrlParser::new();
-    p.scheme_type_mapper(yak_url_scheme);
-    let url = try!(p.parse(loc));
-    debug!("yak:url: {:?}", url);
-    let (addr, space) = match (url.domain(), url.port(), url.serialize_path()) {
-      (Some(host), Some(port), Some(path)) => ((host, port), path),
-      _ => return Err(YakError::InvalidUrl(url.clone()))
-    };
+pub struct Request {
+  space: String,
+  operation: Operation,
+}
+pub enum Operation {
+  Truncate ,
+  Read { key: Vec<u8> },
+  Write { key: Vec<u8>, value: Vec<u8> },
+}
 
-    let sock = try!(TcpStream::connect(addr));
-    debug!("connected:{:?}", sock);
-    Ok(Client { connection: BufStream::new(sock), space: space })
+impl Request {
+  fn encode<B: MessageBuilder>(&self, message: &mut B) {
+    match &self.operation {
+      &Operation::Truncate => Self::encode_truncate(message, &self.space),
+      &Operation::Read { key: ref key } => Self::encode_read(message, &self.space, &key),
+      &Operation::Write { key: ref key, value: ref val } => Self::encode_write(message, &self.space, &key, &val),
+    }
+  }
+
+  fn truncate(space: &str) -> Request {
+    Request { space: space.to_string(), operation: Operation::Truncate }
+  }
+
+  fn read(space: &str, key: &[u8]) -> Request {
+    Request { space: space.to_string(), operation: Operation::Read { key: key.to_vec() } }
+  }
+
+  fn write(space: &str, key: &[u8], value: &[u8]) -> Request {
+    Request { space: space.to_string(), operation: Operation::Write { key: key.to_owned(), value: value.to_owned() } }
   }
 
   fn encode_truncate<B: MessageBuilder>(message: &mut B, space: &str) {
@@ -75,6 +90,25 @@ impl Client {
       let mut req = rec.init_read();
       req.set_space(space);
       req.set_key(key)
+  }
+
+
+}
+
+impl Client {
+  pub fn connect(loc: &str) -> Result<Client, YakError> {
+    let mut p = UrlParser::new();
+    p.scheme_type_mapper(yak_url_scheme);
+    let url = try!(p.parse(loc));
+    debug!("yak:url: {:?}", url);
+    let (addr, space) = match (url.domain(), url.port(), url.serialize_path()) {
+      (Some(host), Some(port), Some(path)) => ((host, port), path),
+      _ => return Err(YakError::InvalidUrl(url.clone()))
+    };
+
+    let sock = try!(TcpStream::connect(addr));
+    debug!("connected:{:?}", sock);
+    Ok(Client { connection: BufStream::new(sock), space: space })
   }
 
   fn expect_ok<R: MessageReader>(message: &R) -> Result<(), YakError> {
@@ -105,7 +139,7 @@ impl Client {
 
   pub fn truncate(&mut self) -> Result<(), YakError> {
     let mut message = MallocMessageBuilder::new_default();
-    Self::encode_truncate(&mut message, &self.space);
+    Request::truncate(&self.space).encode(&mut message);
     try!(serialize_packed::write_message(&mut self.connection, &mut message));
     try!(self.connection.flush());
     debug!("Waiting for response");
@@ -116,7 +150,7 @@ impl Client {
 
   pub fn write(&mut self, key: &[u8], val: &[u8]) -> Result<(), YakError> {
     let mut message = MallocMessageBuilder::new_default();
-    Self::encode_write(&mut message, &self.space, key, val);
+    Request::write(&self.space, key, val).encode(&mut message);
     try!(serialize_packed::write_message(&mut self.connection, &mut message));
     try!(self.connection.flush());
     debug!("Waiting for response");
@@ -127,7 +161,7 @@ impl Client {
 
   pub fn read(&mut self, key: &[u8]) -> Result<Vec<Datum>, YakError> {
     let mut message = MallocMessageBuilder::new_default();
-    Self::encode_read(&mut message, &self.space, key);
+    Request::read(&self.space, key).encode(&mut message);
     try!(serialize_packed::write_message(&mut self.connection, &mut message));
     try!(self.connection.flush());
     debug!("Waiting for response");
