@@ -147,7 +147,7 @@ impl Client {
 
   pub fn truncate(&mut self) -> Result<(), YakError> {
     let req = Request::truncate(&self.space);
-    self.send(req);
+    try!(self.send(req));
     debug!("Waiting for response");
 
     let message_reader = try!(serialize_packed::read_message(&mut self.connection, ReaderOptions::new()));
@@ -156,7 +156,7 @@ impl Client {
 
   pub fn write(&mut self, key: &[u8], val: &[u8]) -> Result<(), YakError> {
     let req = Request::write(&self.space, key, val);
-    self.send(req);
+    try!(self.send(req));
     debug!("Waiting for response");
 
     let message_reader = try!(serialize_packed::read_message(&mut self.connection, ReaderOptions::new()));
@@ -165,7 +165,7 @@ impl Client {
 
   pub fn read(&mut self, key: &[u8]) -> Result<Vec<Datum>, YakError> {
     let req = Request::read(&self.space, key);
-    self.send(req);
+    try!(self.send(req));
     debug!("Waiting for response");
 
     let message_reader = try!(serialize_packed::read_message(&mut self.connection, ReaderOptions::new()));
