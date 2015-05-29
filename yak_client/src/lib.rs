@@ -7,7 +7,7 @@ extern crate capnp;
 
 pub mod yak_capnp;
 
-use std::net::TcpStream;
+use std::net::{TcpStream,ToSocketAddrs};
 use std::io::{self,BufStream,Write};
 use capnp::serialize_packed;
 use capnp::{MessageBuilder, MessageReader, MallocMessageBuilder, ReaderOptions};
@@ -18,11 +18,6 @@ use yak_capnp::{client_request,client_response};
 
 fn yak_url_scheme(_scheme: &str) -> SchemeType {
   SchemeType::Relative(0)
-}
-
-pub struct Client {
-  connection: BufStream<TcpStream>,
-  space: String,
 }
 
 #[derive(Debug)]
@@ -51,14 +46,6 @@ pub enum Operation {
 }
 
 impl Request {
-  fn encode<B: MessageBuilder>(&self, message: &mut B) {
-    match &self.operation {
-      &Operation::Truncate => Self::encode_truncate(message, &self.space),
-      &Operation::Read { key: ref key } => Self::encode_read(message, &self.space, &key),
-      &Operation::Write { key: ref key, value: ref val } => Self::encode_write(message, &self.space, &key, &val),
-    }
-  }
-
   fn truncate(space: &str) -> Request {
     Request { space: space.to_string(), operation: Operation::Truncate }
   }
@@ -93,28 +80,26 @@ impl Request {
   }
 }
 
+impl WireMessage for Request {
+  fn encode<B: MessageBuilder>(&self, message: &mut B) {
+    match &self.operation {
+      &Operation::Truncate => Self::encode_truncate(message, &self.space),
+      &Operation::Read { key: ref key } => Self::encode_read(message, &self.space, &key),
+      &Operation::Write { key: ref key, value: ref val } => Self::encode_write(message, &self.space, &key, &val),
+    }
+  }
+
+  fn decode<R: MessageReader>(message: &R) -> Result<Self, YakError> {
+    unimplemented!()
+  }
+}
+
 pub enum Response {
   Okay,
   OkayData(Vec<Datum>)
 }
 
 impl Response {
-  fn decode<R: MessageReader>(message: &R) -> Result<Response, YakError> {
-    let msg = try!(message.get_root::<client_response::Reader>());
-    match try!(msg.which()) {
-      client_response::Ok(()) => Ok(Response::Okay),
-      client_response::OkData(d) => {
-        debug!("Got response Data: ");
-        let mut data = Vec::with_capacity(try!(d).len() as usize);
-        for it in try!(d).iter() {
-          let val : Vec<u8> = try!(it.get_value()).iter().map(|v|v.clone()).collect();
-          data.push(Datum { content: val });
-        }
-        Ok(Response::OkayData(data))
-      }
-    }
-  }
-
   pub fn expect_ok(&self) -> Result<(), YakError> {
     match self {
       &Response::Okay => Ok(()),
@@ -130,6 +115,68 @@ impl Response {
   }
 }
 
+impl WireMessage for Response {
+  fn encode<B: MessageBuilder>(&self, message: &mut B) {
+    unimplemented!()
+  }
+
+  fn decode<R: MessageReader>(message: &R) -> Result<Self, YakError> {
+    let msg = try!(message.get_root::<client_response::Reader>());
+    match try!(msg.which()) {
+      client_response::Ok(()) => Ok(Response::Okay),
+      client_response::OkData(d) => {
+        debug!("Got response Data: ");
+        let mut data = Vec::with_capacity(try!(d).len() as usize);
+        for it in try!(d).iter() {
+          let val : Vec<u8> = try!(it.get_value()).iter().map(|v|v.clone()).collect();
+          data.push(Datum { content: val });
+        }
+        Ok(Response::OkayData(data))
+      }
+    }
+  }
+}
+#[derive(Debug)]
+struct WireProtocol<S: io::Read+io::Write> {
+  connection: BufStream<S>,
+}
+
+trait WireMessage {
+  fn encode<B: MessageBuilder>(&self, message: &mut B);
+  fn decode<R: MessageReader>(message: &R) -> Result<Self, YakError>;
+}
+
+impl WireProtocol<TcpStream> {
+  fn connect<A: ToSocketAddrs>(addr: A) -> Result<Self, YakError> {
+    let sock = try!(TcpStream::connect(addr));
+    debug!("connected:{:?}", sock);
+    let stream = BufStream::new(sock);
+    Ok(WireProtocol { connection: stream })
+  }
+
+  fn send<M : WireMessage>(&mut self, req: M) -> Result<(), YakError> {
+    let mut message = MallocMessageBuilder::new_default();
+    req.encode(&mut message);
+    try!(serialize_packed::write_message(&mut self.connection, &mut message));
+    try!(self.connection.flush());
+    Ok(())
+  }
+
+  fn read<M : WireMessage>(&mut self) -> Result<M,YakError> {
+    let message_reader =
+      try!(serialize_packed::read_message(
+	&mut self.connection, ReaderOptions::new()));
+    let resp = try!(M::decode(&message_reader));
+    Ok(resp)
+  }
+}
+
+#[derive(Debug)]
+pub struct Client {
+  protocol: WireProtocol<TcpStream>,
+  space: String,
+}
+
 impl Client {
   pub fn connect(loc: &str) -> Result<Client, YakError> {
     let mut p = UrlParser::new();
@@ -141,9 +188,8 @@ impl Client {
       _ => return Err(YakError::InvalidUrl(url.clone()))
     };
 
-    let sock = try!(TcpStream::connect(addr));
-    debug!("connected:{:?}", sock);
-    Ok(Client { connection: BufStream::new(sock), space: space })
+    let proto = try!(WireProtocol::connect(addr));
+    Ok(Client { protocol: proto, space: space })
   }
 
   fn expect_ok<R: MessageReader>(message: &R) -> Result<(), YakError> {
@@ -172,42 +218,26 @@ impl Client {
     }
   }
 
-  fn send(&mut self, req: Request) -> Result<(), YakError> {
-    let mut message = MallocMessageBuilder::new_default();
-    req.encode(&mut message);
-    try!(serialize_packed::write_message(&mut self.connection, &mut message));
-    try!(self.connection.flush());
-    Ok(())
-  }
-
-  fn read_response(&mut self) -> Result<Response,YakError> {
-    let message_reader =
-      try!(serialize_packed::read_message(
-	&mut self.connection, ReaderOptions::new()));
-    let resp = try!(Response::decode(&message_reader));
-    Ok(resp)
-  }
-
   pub fn truncate(&mut self) -> Result<(), YakError> {
     let req = Request::truncate(&self.space);
-    try!(self.send(req));
+    try!(self.protocol.send(req));
     debug!("Waiting for response");
-    try!(self.read_response()).expect_ok()
+    try!(self.protocol.read::<Response>()).expect_ok()
   }
 
   pub fn write(&mut self, key: &[u8], val: &[u8]) -> Result<(), YakError> {
     let req = Request::write(&self.space, key, val);
-    try!(self.send(req));
+    try!(self.protocol.send(req));
     debug!("Waiting for response");
-    try!(self.read_response()).expect_ok()
+    try!(self.protocol.read::<Response>()).expect_ok()
   }
 
   pub fn read(&mut self, key: &[u8]) -> Result<Vec<Datum>, YakError> {
     let req = Request::read(&self.space, key);
-    try!(self.send(req));
+    try!(self.protocol.send(req));
     debug!("Waiting for response");
 
-    try!(self.read_response()).expect_datum_list()
+    try!(self.protocol.read::<Response>()).expect_datum_list()
   }
 }
 
