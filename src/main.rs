@@ -146,6 +146,7 @@ impl DownStream<TcpStream> {
   fn new(addr: &str) -> Result<DownStream<TcpStream>, ServerError> {
     debug!("Connect downstream: {:?}", addr);
     let proto = try!(WireProtocol::connect(addr));
+    debug!("Connected downstream: {:?}", proto);
 
     Ok(DownStream { protocol: Arc::new(Mutex::new(proto)) })
   }
