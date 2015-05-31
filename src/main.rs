@@ -3,7 +3,9 @@
 extern crate env_logger;
 extern crate yak_client;
 extern crate capnp;
+extern crate log4rs;
 
+use std::default::Default;
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 use std::io::{self,Read,Write};
@@ -106,8 +108,12 @@ impl<S> Clone for DownStream<S> where S: Read+Write {
   }
 }
 
+static LOG_FILE: &'static str = "log.toml";
+
 pub fn main() {
-  env_logger::init().unwrap();
+  if let Err(e) = log4rs::init_file(LOG_FILE, Default::default()) {
+    panic!("Could not init logger from file {}: {}", LOG_FILE, e);
+  }
 
   match do_run() {
     Ok(()) => info!("Terminated normally"),

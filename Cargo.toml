@@ -16,5 +16,6 @@ path = "./yak_client"
 [dependencies]
 url = "0.2.34"
 log = "^0.3"
+log4rs = "^0.3.3"
 env_logger = "^0.3"
 capnp = "^0.2.0"
