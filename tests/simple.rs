@@ -26,7 +26,6 @@ fn test_put_read_empty() {
 
   let (mut head, mut tail) = open_client("test_put_read_empty");
   let key = "key";
-  let val = "value";
 
   head.truncate().unwrap();
 
@@ -56,7 +55,7 @@ fn test_put_read_persistence() {
   let key = "key";
   let val = "value";
   {
-    let (mut head, mut tail) = open_client("test_put_read_persistence");
+    let (mut head, _) = open_client("test_put_read_persistence");
 
     head.truncate().unwrap();
 
@@ -64,7 +63,7 @@ fn test_put_read_persistence() {
   }
 
   {
-    let (mut head, mut tail) = open_client("test_put_read_persistence");
+    let (_, mut tail) = open_client("test_put_read_persistence");
     let resp = tail.read(key.as_bytes()).unwrap();
     assert_eq!(resp.len(), 1);
     assert_eq!(resp[0].content, val.as_bytes())
