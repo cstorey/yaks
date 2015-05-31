@@ -50,29 +50,6 @@ fn test_put_read_single_value() {
 }
 
 #[test]
-fn test_put_read_persistence() {
-  env_logger::init().unwrap_or(());
-  let key = "key";
-  let val = "value";
-  {
-    let (mut head, _) = open_client("test_put_read_persistence");
-
-    head.truncate().unwrap();
-
-    head.write(key.as_bytes(), val.as_bytes()).unwrap();
-  }
-
-  {
-    let (_, mut tail) = open_client("test_put_read_persistence");
-    let resp = tail.read(key.as_bytes()).unwrap();
-    assert_eq!(resp.len(), 1);
-    assert_eq!(resp[0].content, val.as_bytes())
-  }
-}
-
-
-
-#[test]
 fn test_put_read_two_values() {
   env_logger::init().unwrap_or(());
   let (mut head, mut tail) = open_client("test_put_read_two_values");
