@@ -118,7 +118,7 @@ pub fn main() {
 fn do_run() -> Result<(), ServerError> {
   let mut a = std::env::args().skip(1);
   let local : String = a.next().unwrap();
-  let next = match a.next() { 
+  let next = match a.next() {
       Some(ref addr) => Some(try!(DownStream::new(addr))),
       None => None
   };
@@ -150,6 +150,17 @@ impl DownStream<TcpStream> {
 
     Ok(DownStream { protocol: Arc::new(Mutex::new(proto)) })
   }
+
+}
+impl<S: Read+Write> DownStream<S> {
+  fn handle(&self, msg: &Request) -> Result<Response, ServerError> {
+    let mut wire = self.protocol.lock().unwrap();
+    debug!("Downstream: -> {:?}", msg);
+    try!(wire.send(msg));
+    let resp = try!(wire.read::<Response>());
+    debug!("Downstream: <- {:?}", resp);
+    resp.map(Ok).unwrap_or(Err(ServerError::DownstreamError(YakError::ProtocolError)))
+  }
 }
 
 struct Session<Id, S:Read+Write+'static, ST> {
@@ -173,19 +184,39 @@ impl<Id: fmt::Display, S: Read+Write, ST:Store> Session<Id, S, ST> {
   fn process_requests(&mut self) -> Result<(), ServerError> {
     debug!("{}: Waiting for message", self.id);
     while let Some(msg) = try!(self.protocol.read::<Request>()) {
-      debug!("{}: Read message", self.id);
-
-      let resp = match msg.operation {
-          Operation::Truncate => try!(self.truncate(&msg.space)),
-          Operation::Read { key } =>
-            try!(self.read(&msg.space, &key)),
-          Operation::Write { key, value } =>
-            try!(self.write(&msg.space, &key, &value))
-        };
-      try!(self.protocol.send(resp))
+      try!(self.process_one(msg));
     }
 
     Ok(())
+  }
+
+  fn process_one(&mut self, msg: Request) -> Result<(), ServerError> {
+    debug!("{}: Handle message: {:?}", self.id, msg);
+
+    let resp = match msg.operation {
+      Operation::Truncate => {
+        let resp = try!(self.truncate(&msg.space));
+        try!(self.send_downstream_or(&msg, resp))
+      },
+        Operation::Write { ref key, ref value } => {
+          let resp = try!(self.write(&msg.space, &key, &value));
+          try!(self.send_downstream_or(&msg, resp))
+        },
+        Operation::Read { key } =>
+          try!(self.read(&msg.space, &key)),
+    };
+
+    debug!("Response: {:?}", resp);
+
+    try!(self.protocol.send(&resp));
+    Ok(())
+  }
+
+  fn send_downstream_or(&self, msg: &Request, default: Response) -> Result<Response, ServerError> {
+    match self.next {
+      Some(ref d) => d.handle(msg),
+      None => Ok(default),
+    }
   }
 
   fn truncate(&self, space: &str) -> Result<Response, ServerError> {

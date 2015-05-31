@@ -63,10 +63,12 @@ pub struct Datum {
   pub content: Vec<u8>
 }
 
+#[derive(Debug)]
 pub struct Request {
   pub space: String,
   pub operation: Operation,
 }
+#[derive(Debug)]
 pub enum Operation {
   Truncate ,
   Read { key: Vec<u8> },
@@ -150,6 +152,7 @@ impl WireMessage for Request {
   }
 }
 
+#[derive(Debug)]
 pub enum Response {
   Okay,
   OkayData(Vec<Datum>)
@@ -226,7 +229,7 @@ impl<S: io::Read+io::Write> WireProtocol<S> {
     WireProtocol { connection: stream }
   }
 
-  pub fn send<M : WireMessage>(&mut self, req: M) -> Result<(), YakError> {
+  pub fn send<M : WireMessage>(&mut self, req: &M) -> Result<(), YakError> {
     let mut message = MallocMessageBuilder::new_default();
     req.encode(&mut message);
     try!(serialize_packed::write_message(&mut self.connection, &mut message));
@@ -271,7 +274,7 @@ impl Client {
 
   pub fn truncate(&mut self) -> Result<(), YakError> {
     let req = Request::truncate(&self.space);
-    try!(self.protocol.send(req));
+    try!(self.protocol.send(&req));
     debug!("Waiting for response");
     try!(self.protocol.read::<Response>())
       .map(|r| r.expect_ok())
@@ -280,7 +283,7 @@ impl Client {
 
   pub fn write(&mut self, key: &[u8], val: &[u8]) -> Result<(), YakError> {
     let req = Request::write(&self.space, key, val);
-    try!(self.protocol.send(req));
+    try!(self.protocol.send(&req));
     debug!("Waiting for response");
     try!(self.protocol.read::<Response>())
       .map(|r| r.expect_ok())
@@ -289,7 +292,7 @@ impl Client {
 
   pub fn read(&mut self, key: &[u8]) -> Result<Vec<Datum>, YakError> {
     let req = Request::read(&self.space, key);
-    try!(self.protocol.send(req));
+    try!(self.protocol.send(&req));
     debug!("Waiting for response");
 
     try!(self.protocol.read::<Response>())
