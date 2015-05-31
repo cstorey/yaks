@@ -1,24 +1,18 @@
 #![feature(convert)]
-#![feature(buf_stream)]
 #[macro_use] extern crate log;
 extern crate env_logger;
 extern crate yak_client;
 extern crate capnp;
 
-use std::net::{TcpListener, TcpStream, Ipv4Addr};
+use std::net::{TcpListener, TcpStream};
 use std::thread;
-use std::io::{self,Read,Write,BufStream,BufRead};
-use std::str::FromStr;
+use std::io::{self,Read,Write};
 use std::fmt;
 use std::sync::{Arc,Mutex};
 use std::collections::HashMap;
 use std::clone::Clone;
 use std::error::Error;
 
-use capnp::serialize_packed;
-use capnp::{MessageBuilder, MessageReader, MallocMessageBuilder, ReaderOptions};
-
-use yak_client::yak_capnp::*;
 use yak_client::{WireProtocol,Request,Response,Operation,Datum,YakError};
 
 type Key = (String, Vec<u8>);
@@ -131,12 +125,12 @@ fn do_run() -> Result<(), ServerError> {
 
   let listener = TcpListener::bind(local.as_str()).unwrap();
   info!("listening started on {}, ready to accept", local);
-  let mut store = MemStore::new();
+  let store = MemStore::new();
   for stream in listener.incoming() {
     let next = next.clone();
     let store = store.clone();
     thread::spawn(move || {
-	let mut sock = stream.unwrap();
+	let sock = stream.unwrap();
 	let peer = sock.peer_addr().unwrap();
 	info!("Accept stream from {:?}", peer);
         match Session::new(peer, sock, store, next).process_requests() {

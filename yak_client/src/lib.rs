@@ -5,7 +5,7 @@ extern crate log;
 extern crate url;
 extern crate capnp;
 
-pub mod yak_capnp;
+mod yak_capnp;
 
 use std::net::{TcpStream,ToSocketAddrs};
 use std::io::{self,BufStream,BufRead,Write};
@@ -48,7 +48,7 @@ impl fmt::Display for YakError {
 impl Error for YakError {
   fn description(&self) -> &str {
     match self {
-      &YakError::InvalidUrl(ref u) => "Invalid URL",
+      &YakError::InvalidUrl(_) => "Invalid URL",
       &YakError::ProtocolError => "Protocol Error",
       &YakError::IoError(ref e) => e.description(),
       &YakError::CapnpError(ref e) => e.description(),
@@ -87,13 +87,13 @@ impl Request {
   }
 
   fn encode_truncate<B: MessageBuilder>(message: &mut B, space: &str) {
-    let mut rec = message.init_root::<client_request::Builder>();
+    let rec = message.init_root::<client_request::Builder>();
     let mut trunc = rec.init_truncate();
     trunc.set_space(space)
   }
 
   fn encode_write<B: MessageBuilder>(message: &mut B, space: &str, key: &[u8], val: &[u8]) {
-    let mut rec = message.init_root::<client_request::Builder>();
+    let rec = message.init_root::<client_request::Builder>();
     let mut req = rec.init_write();
     req.set_space(space);
     req.set_key(key);
@@ -101,7 +101,7 @@ impl Request {
   }
 
   fn encode_read<B: MessageBuilder>(message: &mut B, space: &str, key: &[u8]) {
-      let mut rec = message.init_root::<client_request::Builder>();
+      let rec = message.init_root::<client_request::Builder>();
       let mut req = rec.init_read();
       req.set_space(space);
       req.set_key(key)
@@ -112,8 +112,8 @@ impl WireMessage for Request {
   fn encode<B: MessageBuilder>(&self, message: &mut B) {
     match &self.operation {
       &Operation::Truncate => Self::encode_truncate(message, &self.space),
-      &Operation::Read { key: ref key } => Self::encode_read(message, &self.space, &key),
-      &Operation::Write { key: ref key, value: ref val } => Self::encode_write(message, &self.space, &key, &val),
+      &Operation::Read { ref key } => Self::encode_read(message, &self.space, &key),
+      &Operation::Write { ref key, ref value } => Self::encode_write(message, &self.space, &key, &value),
     }
   }
 
@@ -267,32 +267,6 @@ impl Client {
 
     let proto = try!(WireProtocol::connect(addr));
     Ok(Client { protocol: proto, space: space })
-  }
-
-  fn expect_ok<R: MessageReader>(message: &R) -> Result<(), YakError> {
-    let msg = try!(message.get_root::<client_response::Reader>());
-    debug!("Got response");
-    match try!(msg.which()) {
-      client_response::Ok(()) => Ok(()),
-      other => Err(YakError::ProtocolError)
-    }
-  }
-
-  fn expect_datum_list<R: MessageReader>(message_reader: &R) -> Result<Vec<Datum>, YakError> {
-    let msg = try!(message_reader.get_root::<client_response::Reader>());
-    match try!(msg.which()) {
-      client_response::OkData(d) => {
-        debug!("Got response Data: ");
-        let mut data = Vec::with_capacity(try!(d).len() as usize);
-        for it in try!(d).iter() {
-          let val : Vec<u8> = try!(it.get_value()).iter().map(|v|v.clone()).collect();
-          data.push(Datum { content: val });
-        }
-
-        Ok(data)
-      },
-      other => Err(YakError::ProtocolError)
-    }
   }
 
   pub fn truncate(&mut self) -> Result<(), YakError> {
