@@ -12,11 +12,14 @@ use std::str::FromStr;
 use std::fmt;
 use std::sync::{Arc,Mutex};
 use std::collections::HashMap;
+use std::clone::Clone;
+use std::error::Error;
 
 use capnp::serialize_packed;
 use capnp::{MessageBuilder, MessageReader, MallocMessageBuilder, ReaderOptions};
 
 use yak_client::yak_capnp::*;
+use yak_client::{WireProtocol,Request,Response,Operation,Datum,YakError};
 
 type Key = (String, Vec<u8>);
 type Val = Vec<u8>;
@@ -62,15 +65,69 @@ impl Store for MemStore {
 enum ServerError {
   CapnpError(capnp::Error),
   CapnpNotInSchema(capnp::NotInSchema),
-  IoError(std::io::Error)
+  IoError(std::io::Error),
+  DownstreamError(YakError)
+}
+
+impl fmt::Display for ServerError {
+  fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    match self {
+      &ServerError::CapnpError(ref e) => e.fmt(f),
+      &ServerError::CapnpNotInSchema(ref e) => e.fmt(f),
+      &ServerError::IoError(ref e) => e.fmt(f),
+      &ServerError::DownstreamError(ref e) => e.fmt(f)
+    }
+  }
+}
+
+impl Error for ServerError {
+  fn description(&self) -> &str {
+    match self {
+      &ServerError::CapnpError(ref e) => e.description(),
+      &ServerError::CapnpNotInSchema(ref e) => e.description(),
+      &ServerError::IoError(ref e) => e.description(),
+      &ServerError::DownstreamError(ref e) => e.description()
+    }
+  }
+}
+
+struct DownStream<S: Read+Write> {
+  protocol: Arc<Mutex<WireProtocol<S>>>,
+}
+
+impl <S: ::std::fmt::Debug + Read + Write> ::std::fmt::Debug for DownStream<S>
+ where S: ::std::fmt::Debug + 'static {
+    fn fmt(&self, fmt: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        match self {
+            &DownStream { protocol: ref proto } =>
+            fmt.debug_struct("DownStream").field("protocol",
+                                                     (proto)).finish(),
+        }
+    }
+}
+
+impl<S> Clone for DownStream<S> where S: Read+Write {
+  fn clone(&self) -> DownStream<S> {
+    DownStream { protocol: self.protocol.clone() }
+  }
 }
 
 pub fn main() {
   env_logger::init().unwrap();
 
+  match do_run() {
+    Ok(()) => info!("Terminated normally"),
+    Err(e) => panic!("Failed: {}", e),
+  }
+}
+
+fn do_run() -> Result<(), ServerError> {
   let mut a = std::env::args().skip(1);
   let local : String = a.next().unwrap();
-  let next : Option<String> = a.next();
+  let next = match a.next() { 
+      Some(ref addr) => Some(try!(DownStream::new(addr))),
+      None => None
+  };
 
   let listener = TcpListener::bind(local.as_str()).unwrap();
   info!("listening started on {}, ready to accept", local);
@@ -82,81 +139,77 @@ pub fn main() {
 	let mut sock = stream.unwrap();
 	let peer = sock.peer_addr().unwrap();
 	info!("Accept stream from {:?}", peer);
-        Session::new(peer, sock, store).process_requests().unwrap()
+        match Session::new(peer, sock, store, next).process_requests() {
+          Err(e) => panic!("Processing requests failed: {}", e),
+          _ => ()
+        }
       });
   }
+  Ok(())
 }
 
-struct Session<Id, S:Write, ST> {
-  id: Id,
-  strm: BufStream<S>,
-  store: ST
-}
+impl DownStream<TcpStream> {
+  fn new(addr: &str) -> Result<DownStream<TcpStream>, ServerError> {
+    debug!("Connect downstream: {:?}", addr);
+    let proto = try!(WireProtocol::connect(addr));
 
-
-impl<Id: fmt::Display, S: Read + Write, ST:Store> Session<Id, S, ST> {
-  fn new(id: Id, sock: S, store: ST) -> Session<Id, S, ST> {
-    let mut strm = BufStream::new(sock);
-    Session { id: id, strm:strm, store: store }
+    Ok(DownStream { protocol: Arc::new(Mutex::new(proto)) })
   }
+}
+
+struct Session<Id, S:Read+Write+'static, ST> {
+  id: Id,
+  protocol: WireProtocol<S>,
+  store: ST,
+  next: Option<DownStream<S>>
+}
+
+
+impl<Id: fmt::Display, S: Read+Write, ST:Store> Session<Id, S, ST> {
+  fn new(id: Id, conn: S, store: ST, next: Option<DownStream<S>>) -> Session<Id, S, ST> {
+    Session {
+    	id: id,
+	protocol: WireProtocol::new(conn),
+	store: store,
+	next: next
+    }
+  }
+
   fn process_requests(&mut self) -> Result<(), ServerError> {
-    loop {
-      debug!("{}: Waiting for message", self.id);
-      let len = try!(self.strm.fill_buf()).len();
-      if len == 0 {
-          debug!("{}: End of client stream", self.id);
-          return Ok(())
-      }
-      let message_reader = try!(serialize_packed::read_message(&mut self.strm, ReaderOptions::new()));
-      let msg = try!(message_reader.get_root::<client_request::Reader>());
+    debug!("{}: Waiting for message", self.id);
+    while let Some(msg) = try!(self.protocol.read::<Request>()) {
       debug!("{}: Read message", self.id);
 
-      let mut message = MallocMessageBuilder::new_default();
-      {
-        let mut response = message.init_root::<client_response::Builder>();
-        match try!(msg.which()) {
-          client_request::Truncate(v) => self.truncate(try!(v), response),
-          client_request::Read(v) => self.read(try!(v), response),
-          client_request::Write(v) => self.write(try!(v), response),
+      let resp = match msg.operation {
+          Operation::Truncate => try!(self.truncate(&msg.space)),
+          Operation::Read { key } =>
+            try!(self.read(&msg.space, &key)),
+          Operation::Write { key, value } =>
+            try!(self.write(&msg.space, &key, &value))
         };
-      }
-
-      try!(serialize_packed::write_message(&mut self.strm, &mut message));
-      try!(self.strm.flush())
+      try!(self.protocol.send(resp))
     }
+
+    Ok(())
   }
 
-  fn truncate(&self, req: truncate_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
-    let space = try!(req.get_space());
+  fn truncate(&self, space: &str) -> Result<Response, ServerError> {
     info!("{}/{:?}: truncate", self.id, space);
     self.store.truncate(space);
-    response.set_ok(());
-    Ok(())
+    Ok(Response::Okay)
   }
 
-  fn read(&self, req: read_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
-    let space = try!(req.get_space());
-    let key = try!(req.get_key()).into();
+  fn read(&self, space: &str, key: &[u8]) -> Result<Response, ServerError> {
     let val = self.store.read(space, key);
     info!("{}/{:?}: read:{:?}: -> {:?}", self.id, space, key, val);
-
-    let mut data = response.init_ok_data(val.len() as u32);
-    for i in 0..val.len() {
-      let mut datum = data.borrow().get(i as u32);
-      datum.set_value(&val[i])
-    }
-    Ok(())
+    let data = val.iter().map(|c| Datum { content: c.clone() }).collect();
+    Ok(Response::OkayData(data))
   }
 
-  fn write(&self, v: write_request::Reader, mut response: client_response::Builder) -> Result<(), ServerError> {
-    let space = try!(v.get_space());
-    let key = try!(v.get_key()).into();
-    let val = try!(v.get_value()).into();
+  fn write(&self, space: &str, key: &[u8], val: &[u8]) -> Result<Response, ServerError> {
     info!("{}/{:?}: write:{:?} -> {:?}", self.id, space, key, val);
-
     self.store.write(space, key, val);
-    response.set_ok(());
-    Ok(())
+    Ok(Response::Okay)
   }
 }
 
@@ -175,5 +228,11 @@ impl From<capnp::NotInSchema> for ServerError {
 impl From<io::Error> for ServerError {
   fn from(err: io::Error) -> ServerError {
     ServerError::IoError(err)
+  }
+}
+
+impl From<YakError> for ServerError {
+  fn from(err: YakError) -> ServerError {
+    ServerError::DownstreamError(err)
   }
 }
