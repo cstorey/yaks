@@ -1,11 +1,18 @@
 #![feature(convert)]
+#![feature(plugin)]
+#![plugin(quickcheck_macros)]
+
 #[macro_use]
 extern crate log;
 extern crate env_logger;
 extern crate yak_client;
+
+extern crate quickcheck;
+
+use quickcheck::quickcheck;
 use std::env;
 
-use yak_client::Client;
+use yak_client::{Client, YakError};
 
 fn open_from_env(env_var: &str, name: &str) -> Client {
   let yak_url = env::var(env_var).ok()
@@ -80,4 +87,15 @@ fn test_truncate() {
 
   let resp = tail.read(key.as_bytes()).unwrap();
   assert_eq!(resp.len(), 0);
+}
+
+#[quickcheck]
+fn test_put_read_single_value_qc(key: Vec<u8>, val: Vec<u8>) -> Result<bool, YakError> {
+  let (mut head, mut tail) = open_client("test_put_read_single_value_qc");
+  try!(head.truncate());
+  try!(head.write(&key, &val));
+
+  let resp = try!(tail.read(&key));
+  let contents : Vec<_> = resp.iter().map(|x| x.content.to_vec()).collect();
+  Ok(contents == vec![val])
 }
