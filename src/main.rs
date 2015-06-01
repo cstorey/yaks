@@ -135,15 +135,15 @@ fn do_run() -> Result<(), ServerError> {
   for stream in listener.incoming() {
     let next = next.clone();
     let store = store.clone();
-    thread::spawn(move || {
-	let sock = stream.unwrap();
-	let peer = sock.peer_addr().unwrap();
-	info!("Accept stream from {:?}", peer);
+    let sock = stream.unwrap();
+    let peer = sock.peer_addr().unwrap();
+    let _ = try!(thread::Builder::new().name(format!("client-{}", peer)).spawn(move || {
+	debug!("Accept stream from {:?}", peer);
         match Session::new(peer, sock, store, next).process_requests() {
           Err(e) => panic!("Processing requests failed: {}", e),
           _ => ()
         }
-      });
+      }));
   }
   Ok(())
 }
@@ -161,10 +161,10 @@ impl DownStream<TcpStream> {
 impl<S: Read+Write> DownStream<S> {
   fn handle(&self, msg: &Request) -> Result<Response, ServerError> {
     let mut wire = self.protocol.lock().unwrap();
-    debug!("Downstream: -> {:?}", msg);
+    trace!("Downstream: -> {:?}", msg);
     try!(wire.send(msg));
     let resp = try!(wire.read::<Response>());
-    debug!("Downstream: <- {:?}", resp);
+    trace!("Downstream: <- {:?}", resp);
     resp.map(Ok).unwrap_or(Err(ServerError::DownstreamError(YakError::ProtocolError)))
   }
 }
@@ -188,7 +188,7 @@ impl<Id: fmt::Display, S: Read+Write, ST:Store> Session<Id, S, ST> {
   }
 
   fn process_requests(&mut self) -> Result<(), ServerError> {
-    debug!("{}: Waiting for message", self.id);
+    trace!("{}: Waiting for message", self.id);
     while let Some(msg) = try!(self.protocol.read::<Request>()) {
       try!(self.process_one(msg));
     }
@@ -197,7 +197,7 @@ impl<Id: fmt::Display, S: Read+Write, ST:Store> Session<Id, S, ST> {
   }
 
   fn process_one(&mut self, msg: Request) -> Result<(), ServerError> {
-    debug!("{}: Handle message: {:?}", self.id, msg);
+    trace!("{}: Handle message: {:?}", self.id, msg);
 
     let resp = match msg.operation {
       Operation::Truncate => {
@@ -212,7 +212,7 @@ impl<Id: fmt::Display, S: Read+Write, ST:Store> Session<Id, S, ST> {
           try!(self.read(&msg.space, &key)),
     };
 
-    debug!("Response: {:?}", resp);
+    trace!("Response: {:?}", resp);
 
     try!(self.protocol.send(&resp));
     Ok(())
@@ -226,20 +226,20 @@ impl<Id: fmt::Display, S: Read+Write, ST:Store> Session<Id, S, ST> {
   }
 
   fn truncate(&self, space: &str) -> Result<Response, ServerError> {
-    info!("{}/{:?}: truncate", self.id, space);
+    trace!("{}/{:?}: truncate", self.id, space);
     self.store.truncate(space);
     Ok(Response::Okay)
   }
 
   fn read(&self, space: &str, key: &[u8]) -> Result<Response, ServerError> {
     let val = self.store.read(space, key);
-    info!("{}/{:?}: read:{:?}: -> {:?}", self.id, space, key, val);
+    trace!("{}/{:?}: read:{:?}: -> {:?}", self.id, space, key, val);
     let data = val.iter().map(|c| Datum { content: c.clone() }).collect();
     Ok(Response::OkayData(data))
   }
 
   fn write(&self, space: &str, key: &[u8], val: &[u8]) -> Result<Response, ServerError> {
-    info!("{}/{:?}: write:{:?} -> {:?}", self.id, space, key, val);
+    trace!("{}/{:?}: write:{:?} -> {:?}", self.id, space, key, val);
     self.store.write(space, key, val);
     Ok(Response::Okay)
   }
