@@ -16,7 +16,7 @@ use capnp::{MessageBuilder, MessageReader, MallocMessageBuilder, ReaderOptions};
 
 use url::{Url,SchemeType,UrlParser};
 
-use yak_capnp::{client_request,client_response};
+use yak_capnp::*;
 
 fn yak_url_scheme(_scheme: &str) -> SchemeType {
   SchemeType::Relative(0)
@@ -89,24 +89,25 @@ impl Request {
   }
 
   fn encode_truncate<B: MessageBuilder>(message: &mut B, space: &str) {
-    let rec = message.init_root::<client_request::Builder>();
-    let mut trunc = rec.init_truncate();
-    trunc.set_space(space)
+    let mut rec = message.init_root::<client_request::Builder>();
+    rec.set_space(space);
+    let mut op = rec.init_operation();
+    op.set_truncate(())
   }
 
   fn encode_write<B: MessageBuilder>(message: &mut B, space: &str, key: &[u8], val: &[u8]) {
-    let rec = message.init_root::<client_request::Builder>();
-    let mut req = rec.init_write();
-    req.set_space(space);
+    let mut rec = message.init_root::<client_request::Builder>();
+    rec.set_space(space);
+    let mut req = rec.init_operation().init_write();
     req.set_key(key);
     req.set_value(val);
   }
 
   fn encode_read<B: MessageBuilder>(message: &mut B, space: &str, key: &[u8]) {
-      let rec = message.init_root::<client_request::Builder>();
-      let mut req = rec.init_read();
-      req.set_space(space);
-      req.set_key(key)
+    let mut rec = message.init_root::<client_request::Builder>();
+    rec.set_space(space);
+    let mut req = rec.init_operation().init_read();
+    req.set_key(key)
   }
 }
 
@@ -121,27 +122,28 @@ impl WireMessage for Request {
 
   fn decode<R: MessageReader>(message: &R) -> Result<Self, YakError> {
     let msg = try!(message.get_root::<client_request::Reader>());
-    match try!(msg.which()) {
-      client_request::Truncate(v) => {
-        let v = try!(v);
+    let space = try!(msg.get_space()).into();
+    let op = try!(msg.get_operation());
+    match try!(op.which()) {
+      operation::Truncate(()) => {
         Ok(Request {
-          space: try!(v.get_space()).into(),
+          space: space,
           operation: Operation::Truncate,
         })
       },
-      client_request::Read(v) => {
+      operation::Read(v) => {
         let v = try!(v);
         Ok(Request {
-          space: try!(v.get_space()).into(),
+          space: space,
           operation: Operation::Read {
             key: try!(v.get_key()).into(),
           }
         })
       },
-      client_request::Write(v) => {
+      operation::Write(v) => {
         let v = try!(v);
         Ok(Request {
-          space: try!(v.get_space()).into(),
+          space: space,
           operation: Operation::Write {
             key: try!(v.get_key()).into(),
             value: try!(v.get_value()).into(),
