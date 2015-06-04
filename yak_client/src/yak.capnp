@@ -18,6 +18,7 @@ struct Operation {
     truncate @0 : Void;
     read @1 : ReadRequest;
     write @2 : WriteRequest;
+    subscribe @3 : Void;
   }
 }
 
@@ -31,5 +32,6 @@ struct ClientResponse {
   union {
     ok @0 : Void;
     okData @1 : List(Datum);
+    delivery @2 : Datum;
   }
 }

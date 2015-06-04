@@ -60,6 +60,7 @@ impl Error for YakError {
 
 #[derive(PartialEq,Eq,PartialOrd,Ord,Debug, Clone)]
 pub struct Datum {
+  pub key: Vec<u8>,
   pub content: Vec<u8>
 }
 
@@ -68,11 +69,13 @@ pub struct Request {
   pub space: String,
   pub operation: Operation,
 }
+
 #[derive(Debug)]
 pub enum Operation {
   Truncate ,
   Read { key: Vec<u8> },
   Write { key: Vec<u8>, value: Vec<u8> },
+  Subscribe,
 }
 
 impl Request {
@@ -86,6 +89,10 @@ impl Request {
 
   fn write(space: &str, key: &[u8], value: &[u8]) -> Request {
     Request { space: space.to_string(), operation: Operation::Write { key: key.to_owned(), value: value.to_owned() } }
+  }
+
+  fn subscribe(space: &str) -> Request {
+    Request { space: space.to_string(), operation: Operation::Subscribe }
   }
 
   fn encode_truncate<B: MessageBuilder>(message: &mut B, space: &str) {
@@ -109,6 +116,12 @@ impl Request {
     let mut req = rec.init_operation().init_read();
     req.set_key(key)
   }
+
+  fn encode_subscribe<B: MessageBuilder>(message: &mut B, space: &str) {
+    let mut rec = message.init_root::<client_request::Builder>();
+    rec.set_space(space);
+    rec.init_operation().set_subscribe(())
+  }
 }
 
 impl WireMessage for Request {
@@ -117,6 +130,7 @@ impl WireMessage for Request {
       &Operation::Truncate => Self::encode_truncate(message, &self.space),
       &Operation::Read { ref key } => Self::encode_read(message, &self.space, &key),
       &Operation::Write { ref key, ref value } => Self::encode_write(message, &self.space, &key, &value),
+      &Operation::Subscribe => Self::encode_subscribe(message, &self.space),
     }
   }
 
@@ -150,6 +164,12 @@ impl WireMessage for Request {
           }
         })
       },
+      operation::Subscribe(()) => {
+        Ok(Request {
+          space: space,
+          operation: Operation::Subscribe,
+        })
+      },
     }
   }
 }
@@ -157,21 +177,29 @@ impl WireMessage for Request {
 #[derive(Debug)]
 pub enum Response {
   Okay,
-  OkayData(Vec<Datum>)
+  OkayData(Vec<Datum>),
+  Delivery(Datum),
 }
 
 impl Response {
   pub fn expect_ok(&self) -> Result<(), YakError> {
     match self {
       &Response::Okay => Ok(()),
-      &Response::OkayData(_) => Err(YakError::ProtocolError)
+      &_ => Err(YakError::ProtocolError)
     }
   }
 
   pub fn expect_datum_list(&self) -> Result<Vec<Datum>, YakError> {
     match self {
       &Response::OkayData(ref result) => Ok(result.clone()),
-      &Response::Okay => Err(YakError::ProtocolError)
+      &_ => Err(YakError::ProtocolError)
+    }
+  }
+
+  pub fn expect_delivery(&self) -> Result<Datum, YakError> {
+    match self {
+      &Response::Delivery(ref result) => Ok(result.clone()),
+      &_ => Err(YakError::ProtocolError)
     }
   }
 }
@@ -187,6 +215,10 @@ impl WireMessage for Response {
           let mut datum = data.borrow().get(i as u32);
           datum.set_value(&val[i].content)
         }
+      },
+      &Response::Delivery(ref val) => {
+        let mut datum = response.init_delivery();
+        datum.set_value(&val.content)
       }
     }
   }
@@ -200,9 +232,16 @@ impl WireMessage for Response {
         let mut data = Vec::with_capacity(try!(d).len() as usize);
         for it in try!(d).iter() {
           let val : Vec<u8> = try!(it.get_value()).iter().map(|v|v.clone()).collect();
-          data.push(Datum { content: val });
+          data.push(Datum { key: vec![], content: val });
         }
         Ok(Response::OkayData(data))
+      },
+      client_response::Delivery(d) => {
+        debug!("Got Delivery: ");
+        let d = try!(d);
+        let val = try!(d.get_value()).into();
+        let datum = Datum { key: vec![], content: val };
+        Ok(Response::Delivery(datum))
       }
     }
   }
@@ -231,7 +270,8 @@ impl<S: io::Read+io::Write> WireProtocol<S> {
     WireProtocol { connection: stream }
   }
 
-  pub fn send<M : WireMessage>(&mut self, req: &M) -> Result<(), YakError> {
+  pub fn send<M : WireMessage + fmt::Debug>(&mut self, req: &M) -> Result<(), YakError> {
+    trace!("Send: {:?}", req);
     let mut message = MallocMessageBuilder::new_default();
     req.encode(&mut message);
     try!(serialize_packed::write_message(&mut self.connection, &mut message));
@@ -239,15 +279,18 @@ impl<S: io::Read+io::Write> WireProtocol<S> {
     Ok(())
   }
 
-  pub fn read<M : WireMessage>(&mut self) -> Result<Option<M>,YakError> {
+  pub fn read<M : WireMessage + fmt::Debug>(&mut self) -> Result<Option<M>,YakError> {
     let len = try!(self.connection.fill_buf()).len();
     if len == 0 {
+      trace!("EOF");
       Ok(None)
     } else {
+      trace!("Reading");
       let message_reader =
         try!(serialize_packed::read_message(
           &mut self.connection, ReaderOptions::new()));
       let resp = try!(M::decode(&message_reader));
+      trace!("Read: {:?}", resp);
       Ok(Some(resp))
     }
   }
@@ -257,6 +300,10 @@ impl<S: io::Read+io::Write> WireProtocol<S> {
 pub struct Client {
   protocol: WireProtocol<TcpStream>,
   space: String,
+}
+
+pub struct Subscription {
+  protocol: WireProtocol<TcpStream>,
 }
 
 impl Client {
@@ -300,6 +347,29 @@ impl Client {
     try!(self.protocol.read::<Response>())
       .map(|r| r.expect_datum_list())
       .unwrap_or(Err(YakError::ProtocolError))
+  }
+
+  pub fn subscribe(mut self) -> Result<Subscription, YakError> {
+    let req = Request::subscribe(&self.space);
+    try!(self.protocol.send(&req));
+    debug!("Waiting for response");
+
+    let resp = try!(self.protocol.read::<Response>());
+    let _ : () = try!(resp.map(|r| r.expect_ok()).unwrap_or(Err(YakError::ProtocolError)));
+    Ok(Subscription { protocol: self.protocol })
+  }
+}
+
+impl Subscription {
+  pub fn fetch_next(&mut self) -> Result<Option<Datum>, YakError> {
+    debug!("Waiting for next delivery");
+    let next = try!(self.protocol.read::<Response>());
+    let next = try!(next.map(Ok).unwrap_or(Err(YakError::ProtocolError)));
+    match next {
+      Response::Okay => Ok(None),
+      Response::Delivery(d) => Ok(Some(d)),
+      _ => Err(YakError::ProtocolError),
+    }
   }
 }
 

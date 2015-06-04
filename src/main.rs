@@ -1,9 +1,13 @@
+#![feature(plugin)]
+#![plugin(quickcheck_macros)]
 #![feature(convert)]
 #[macro_use] extern crate log;
 extern crate env_logger;
 extern crate yak_client;
 extern crate capnp;
 extern crate log4rs;
+#[cfg(test)]
+extern crate quickcheck;
 
 use std::default::Default;
 use std::net::{TcpListener, TcpStream};
@@ -17,45 +21,7 @@ use std::error::Error;
 
 use yak_client::{WireProtocol,Request,Response,Operation,Datum,YakError};
 
-type Key = (String, Vec<u8>);
-type Val = Vec<u8>;
-type Values = Vec<Val>;
-#[derive(Debug,Clone)]
-struct MemStore (Arc<Mutex<HashMap<Key, Values>>>);
-
-trait Store {
-  fn truncate(&self, space: &str);
-  fn read(&self, space: &str, key: &[u8]) -> Values;
-  fn write(&self, space: &str, key: &[u8], val: &[u8]);
-}
-
-impl MemStore {
-  fn new() -> MemStore {
-    MemStore(Arc::new(Mutex::new(HashMap::new())))
-  }
-}
-
-impl Store for MemStore {
-  fn truncate(&self, space: &str) {
-    let mut map = self.0.lock().unwrap();
-    let to_rm = map.keys().filter(|k| k.0 == space).map(|k| k.clone()).collect::<Vec<_>>();
-    for k in to_rm {
-      map.remove(&k);
-    }
-  }
-
-  fn read(&self, space: &str, key: &[u8]) -> Values {
-    let map = self.0.lock().unwrap();
-    let k = (space.into(), key.into());
-    map.get(&k).map(|x| x.clone()).unwrap_or(vec![])
-  }
-  fn write(&self, space: &str, key: &[u8], val: &[u8]) {
-    let mut map = self.0.lock().unwrap();
-    let k = (space.into(), key.into());
-    let entry = map.entry(k).or_insert(vec![]);
-    entry.push(val.into())
-  }
-}
+mod store;
 
 #[derive(Debug)]
 enum ServerError {
@@ -131,7 +97,7 @@ fn do_run() -> Result<(), ServerError> {
 
   let listener = TcpListener::bind(local.as_str()).unwrap();
   info!("listening started on {}, ready to accept", local);
-  let store = MemStore::new();
+  let store = store::MemStore::new();
   for stream in listener.incoming() {
     let next = next.clone();
     let store = store.clone();
@@ -177,7 +143,7 @@ struct Session<Id, S:Read+Write+'static, ST> {
 }
 
 
-impl<Id: fmt::Display, S: Read+Write, ST:Store> Session<Id, S, ST> {
+impl<Id: fmt::Display, S: Read+Write, ST:store::Store> Session<Id, S, ST> {
   fn new(id: Id, conn: S, store: ST, next: Option<DownStream<S>>) -> Session<Id, S, ST> {
     Session {
     	id: id,
@@ -210,6 +176,10 @@ impl<Id: fmt::Display, S: Read+Write, ST:Store> Session<Id, S, ST> {
         },
         Operation::Read { key } =>
           try!(self.read(&msg.space, &key)),
+      Operation::Subscribe => {
+        try!(self.subscribe(&msg.space));
+        Response::Okay
+      },
     };
 
     trace!("Response: {:?}", resp);
@@ -234,7 +204,7 @@ impl<Id: fmt::Display, S: Read+Write, ST:Store> Session<Id, S, ST> {
   fn read(&self, space: &str, key: &[u8]) -> Result<Response, ServerError> {
     let val = self.store.read(space, key);
     trace!("{}/{:?}: read:{:?}: -> {:?}", self.id, space, key, val);
-    let data = val.iter().map(|c| Datum { content: c.clone() }).collect();
+    let data = val.iter().map(|c| Datum { key: Vec::new(), content: c.clone() }).collect();
     Ok(Response::OkayData(data))
   }
 
@@ -242,6 +212,13 @@ impl<Id: fmt::Display, S: Read+Write, ST:Store> Session<Id, S, ST> {
     trace!("{}/{:?}: write:{:?} -> {:?}", self.id, space, key, val);
     self.store.write(space, key, val);
     Ok(Response::Okay)
+  }
+  fn subscribe(&mut self, space: &str) -> Result<(), ServerError> {
+    try!(self.protocol.send(&Response::Okay));
+    for d in self.store.subscribe(space) {
+      try!(self.protocol.send(&Response::Delivery(d)));
+    }
+    Ok(())
   }
 }
 
