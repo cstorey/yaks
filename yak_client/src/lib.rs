@@ -218,6 +218,7 @@ impl WireMessage for Response {
       },
       &Response::Delivery(ref val) => {
         let mut datum = response.init_delivery();
+        datum.set_key(&val.key);
         datum.set_value(&val.content)
       }
     }
@@ -237,10 +238,11 @@ impl WireMessage for Response {
         Ok(Response::OkayData(data))
       },
       client_response::Delivery(d) => {
-        debug!("Got Delivery: ");
         let d = try!(d);
+        let key = try!(d.get_key()).into();
         let val = try!(d.get_value()).into();
-        let datum = Datum { key: vec![], content: val };
+        let datum = Datum { key: key, content: val };
+        debug!("Got Delivery: {:?}", datum);
         Ok(Response::Delivery(datum))
       }
     }

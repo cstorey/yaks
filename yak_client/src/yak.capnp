@@ -1,7 +1,8 @@
 @0x8823926807b755b2;
 
 struct Datum {
-  value @0: Data;
+  key @0: Data;
+  value @1: Data;
 }
 
 struct ReadRequest {

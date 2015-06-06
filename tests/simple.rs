@@ -70,18 +70,17 @@ fn test_truncate() {
   assert_eq!(resp.len(), 0);
 }
 
-#[test] #[ignore]
-fn test_subscribe_put_single_value() {
+#[test]
+fn test_subscribe_after_put_single_value() {
   env_logger::init().unwrap_or(());
-  let (mut head, mut tail) = open_client("test_subscribe_put_single_value");
+  let (mut head, mut tail) = open_client("test_subscribe_after_put_single_value");
   let key = b"key";
   let val = b"value";
   head.truncate().unwrap();
-  let mut subscription = tail.subscribe().unwrap();
   head.write(key, val).unwrap();
 
+  let mut subscription = tail.subscribe().unwrap();
   let maybe_message = subscription.fetch_next().unwrap();
+
   assert_eq!(maybe_message.map(|message| (message.key, message.content)), Some((key.to_vec(), val.to_vec())))
 }
-
-
