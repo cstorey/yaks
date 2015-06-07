@@ -1,9 +1,11 @@
-#![feature(convert)]
+#![feature(convert, scoped)]
 
 #[macro_use]
 extern crate log;
 extern crate env_logger;
 extern crate yak_client;
+
+use std::thread;
 
 mod common;
 use common::*;
@@ -81,6 +83,25 @@ fn test_subscribe_after_put_single_value() {
 
   let mut subscription = tail.subscribe().unwrap();
   let maybe_message = subscription.fetch_next().unwrap();
+
+  assert_eq!(maybe_message.map(|message| (message.key, message.content)), Some((key.to_vec(), val.to_vec())))
+}
+
+#[test] #[should_panic]
+fn test_subscribe_async_deliveries() {
+  env_logger::init().unwrap_or(());
+  let (mut head, mut tail) = open_client("test_subscribe_async_deliveries");
+  let key = b"key";
+  let val = b"value";
+  head.truncate().unwrap();
+
+  let sub_task = thread::scoped(move || {
+    let mut subscription = tail.subscribe().unwrap();
+    subscription.fetch_next().unwrap()
+  });
+  head.write(key, val).unwrap();
+
+  let maybe_message = sub_task.join();
 
   assert_eq!(maybe_message.map(|message| (message.key, message.content)), Some((key.to_vec(), val.to_vec())))
 }
