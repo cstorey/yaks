@@ -23,6 +23,7 @@ use std::error::Error;
 use yak_client::{WireProtocol,Request,Response,Operation,Datum,YakError};
 
 mod store;
+mod mem_store;
 
 #[derive(Debug)]
 enum ServerError {
@@ -98,7 +99,7 @@ fn do_run() -> Result<(), ServerError> {
 
   let listener = TcpListener::bind(local.as_str()).unwrap();
   info!("listening started on {}, ready to accept", local);
-  let store = store::MemStore::new();
+  let store = mem_store::MemStore::new();
   for stream in listener.incoming() {
     let next = next.clone();
     let store = store.clone();
