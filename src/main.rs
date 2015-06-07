@@ -1,4 +1,5 @@
 #![feature(plugin)]
+#![feature(scoped)]
 #![plugin(quickcheck_macros)]
 #![feature(convert)]
 #[macro_use] extern crate log;

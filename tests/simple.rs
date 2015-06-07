@@ -2,17 +2,27 @@
 
 #[macro_use]
 extern crate log;
-extern crate env_logger;
+extern crate log4rs;
 extern crate yak_client;
 
 use std::thread;
 
 mod common;
 use common::*;
+use std::sync::{Arc, Barrier, Once, ONCE_INIT};
+
+static LOG_INIT: Once = ONCE_INIT;
+static LOG_FILE: &'static str = "log-test.toml";
+
+fn log_init() {
+  LOG_INIT.call_once(|| {
+    log4rs::init_file(LOG_FILE, Default::default()).unwrap();
+  })
+}
 
 #[test]
 fn test_put_read_empty() {
-  env_logger::init().unwrap_or(());
+  log_init();
 
   let (mut head, mut tail) = open_client("test_put_read_empty");
   let key = "key";
@@ -25,7 +35,7 @@ fn test_put_read_empty() {
 
 #[test]
 fn test_put_read_single_value() {
-  env_logger::init().unwrap_or(());
+  log_init();
   let (mut head, mut tail) = open_client("test_put_read_single_value");
   let key = "key";
   let val = "value";
@@ -41,7 +51,7 @@ fn test_put_read_single_value() {
 
 #[test]
 fn test_put_read_two_values() {
-  env_logger::init().unwrap_or(());
+  log_init();
   let (mut head, mut tail) = open_client("test_put_read_two_values");
   let key = "key";
   let vals = vec!["a".as_bytes(), "b".as_bytes()];
@@ -59,7 +69,7 @@ fn test_put_read_two_values() {
 
 #[test]
 fn test_truncate() {
-  env_logger::init().unwrap_or(());
+  log_init();
   let (mut head, mut tail) = open_client("test_truncate");
   let key = "key";
   let val = "value";
@@ -74,8 +84,9 @@ fn test_truncate() {
 
 #[test]
 fn test_subscribe_after_put_single_value() {
-  env_logger::init().unwrap_or(());
-  let (mut head, mut tail) = open_client("test_subscribe_after_put_single_value");
+  static TEST_NAME: &'static str = "test_subscribe_after_put_single_value";
+  log_init();
+  let (mut head, mut tail) = open_client(TEST_NAME);
   let key = b"key";
   let val = b"value";
   head.truncate().unwrap();
@@ -87,18 +98,33 @@ fn test_subscribe_after_put_single_value() {
   assert_eq!(maybe_message.map(|message| (message.key, message.content)), Some((key.to_vec(), val.to_vec())))
 }
 
-#[test] #[should_panic]
+#[test]
 fn test_subscribe_async_deliveries() {
-  env_logger::init().unwrap_or(());
-  let (mut head, mut tail) = open_client("test_subscribe_async_deliveries");
+  static TEST_NAME: &'static str = "test_subscribe_async_deliveries";
+  log_init();
+  let (mut head, mut tail) = open_client(TEST_NAME);
   let key = b"key";
   let val = b"value";
   head.truncate().unwrap();
 
-  let sub_task = thread::scoped(move || {
+  let barrier = Arc::new(Barrier::new(2));
+
+  let builder = thread::Builder::new().name(format!("{}::subscriber", thread::current().name().unwrap_or(TEST_NAME)));
+  let b = barrier.clone();
+  let sub_task = builder.scoped(move || {
+    debug!("Starting subscriber");
     let mut subscription = tail.subscribe().unwrap();
-    subscription.fetch_next().unwrap()
-  });
+    debug!("Await barrier");
+    b.wait();
+    debug!("Await next:");
+    let ret = subscription.fetch_next().unwrap();
+    debug!("Received: {:?}", ret);
+    ret
+  }).unwrap();
+
+  debug!("Await barrier");
+  barrier.wait();
+  debug!("Write value");
   head.write(key, val).unwrap();
 
   let maybe_message = sub_task.join();
