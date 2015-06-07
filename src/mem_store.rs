@@ -153,23 +153,5 @@ mod test {
     }
   }
 
-  #[quickcheck]
-  fn test_put_read_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>, needle_sel: usize) -> Result<TestResult, YakError> {
-    MemStore::test_put_read_values_qc(kvs, needle_sel)
-  }
-
-  #[quickcheck]
-  fn test_put_subscribe_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
-    MemStore::test_put_subscribe_values_qc(kvs)
-  }
-
-  #[quickcheck]
-  fn test_put_subscribe_values_per_space(kvs: Vec<(bool, Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
-    MemStore::test_put_subscribe_values_per_space(kvs)
-  }
-
-  #[quickcheck]
-  fn test_put_async_subscribe_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
-    MemStore::test_put_async_subscribe_values_qc(kvs)
-  }
+  build_store_tests!(MemStore);
 }

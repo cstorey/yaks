@@ -22,7 +22,7 @@ use std::error::Error;
 
 use yak_client::{WireProtocol,Request,Response,Operation,Datum,YakError};
 
-mod store;
+#[macro_use] mod store;
 mod mem_store;
 
 #[derive(Debug)]

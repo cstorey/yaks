@@ -24,6 +24,7 @@ pub trait Store {
 }
 
 #[cfg(test)]
+#[macro_use]
 pub mod test {
   use super::*;
   use std::thread;
@@ -139,6 +140,30 @@ pub mod test {
       debug!("Expected: {:?}", kvs);
       debug!("Ok?     : {:?}", kvs == actual);
       Ok(kvs == actual)
+    }
+  }
+
+  macro_rules! build_store_tests {
+    ($t:ident) => {
+      #[quickcheck]
+      fn test_put_read_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>, needle_sel: usize) -> Result<TestResult, YakError> {
+        $t::test_put_read_values_qc(kvs, needle_sel)
+      }
+
+      #[quickcheck]
+      fn test_put_subscribe_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
+        $t::test_put_subscribe_values_qc(kvs)
+      }
+
+      #[quickcheck]
+      fn test_put_subscribe_values_per_space(kvs: Vec<(bool, Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
+        $t::test_put_subscribe_values_per_space(kvs)
+      }
+
+      #[quickcheck]
+      fn test_put_async_subscribe_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
+        $t::test_put_async_subscribe_values_qc(kvs)
+      }
     }
   }
 }
