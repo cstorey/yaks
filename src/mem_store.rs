@@ -147,30 +147,29 @@ mod test {
   use quickcheck::TestResult;
   use yak_client::{Datum,YakError};
 
-  impl TestableStore for MemStore {}
+  impl TestableStore for MemStore {
+    fn build() -> MemStore {
+      MemStore::new()
+    }
+  }
 
   #[quickcheck]
   fn test_put_read_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>, needle_sel: usize) -> Result<TestResult, YakError> {
-    let mut store = MemStore::new();
-    TestableStore::test_put_read_values_qc(&mut store, kvs, needle_sel)
+    MemStore::test_put_read_values_qc(kvs, needle_sel)
   }
-
 
   #[quickcheck]
   fn test_put_subscribe_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
-    let mut store = MemStore::new();
-    TestableStore::test_put_subscribe_values_qc(&mut store, kvs)
+    MemStore::test_put_subscribe_values_qc(kvs)
   }
 
   #[quickcheck]
   fn test_put_subscribe_values_per_space(kvs: Vec<(bool, Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
-    let mut store = MemStore::new();
-    TestableStore::test_put_subscribe_values_per_space(&mut store, kvs)
+    MemStore::test_put_subscribe_values_per_space(kvs)
   }
 
   #[quickcheck]
   fn test_put_async_subscribe_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
-    let mut store = MemStore::new();
-    TestableStore::test_put_async_subscribe_values_qc(&mut store, kvs)
+    MemStore::test_put_async_subscribe_values_qc(kvs)
   }
 }

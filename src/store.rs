@@ -43,8 +43,11 @@ pub mod test {
   }
 
 
-  pub trait TestableStore : Store + Sync {
-    fn test_put_read_values_qc(store: &mut Self, kvs: Vec<(Vec<u8>, Vec<u8>)>, needle_sel: usize) -> Result<TestResult, YakError> {
+  pub trait TestableStore : Store + Sync + Sized {
+    fn build() -> Self;
+    fn test_put_read_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>, needle_sel: usize) -> Result<TestResult, YakError> {
+      log_init();
+      let mut store = Self::build();
 
       let space = "X";
       for &(ref key, ref val) in &kvs {
@@ -67,8 +70,10 @@ pub mod test {
       }
     }
 
-    fn test_put_subscribe_values_qc(store:&mut Self, kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
+    fn test_put_subscribe_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
       log_init();
+      let mut store = Self::build();
+
       let space = "test_put_subscribe_values_qc";
       for &(ref key, ref val) in &kvs {
         store.write(&space, &key, &val);
@@ -82,8 +87,10 @@ pub mod test {
       Ok(kvs == actual)
     }
 
-    fn test_put_subscribe_values_per_space(store: &mut Self, kvs: Vec<(bool, Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
+    fn test_put_subscribe_values_per_space(kvs: Vec<(bool, Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
       log_init();
+      let mut store = Self::build();
+
       let space_prefix = "test_put_subscribe_values_qc";
       for &(ref space_suff, ref key, ref val) in &kvs {
         let space = format!("{}/{}", space_prefix, space_suff);
@@ -103,9 +110,11 @@ pub mod test {
       Ok(expected == actual)
     }
 
-    fn test_put_async_subscribe_values_qc(store: &mut Self, kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
-      static TEST_NAME : &'static str = "test_put_async_subscribe_values_qc";
+    fn test_put_async_subscribe_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
       log_init();
+      static TEST_NAME : &'static str = "test_put_async_subscribe_values_qc";
+
+      let mut store = Self::build();
       let space = TEST_NAME;
       let barrier = Arc::new(Barrier::new(2));
       let builder = thread::Builder::new().name(format!("{}::subscriber", thread::current().name().unwrap_or(TEST_NAME)));
