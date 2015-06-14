@@ -145,24 +145,24 @@ pub mod test {
 
   macro_rules! build_store_tests {
     ($t:ident) => {
-      #[quickcheck]
-      fn test_put_read_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>, needle_sel: usize) -> Result<TestResult, YakError> {
-        $t::test_put_read_values_qc(kvs, needle_sel)
+      #[test]
+      fn test_put_read_values_qc() {
+        ::quickcheck::quickcheck($t::test_put_read_values_qc as fn (kvs: Vec<(Vec<u8>, Vec<u8>)>, needle_sel: usize) -> Result<TestResult, YakError>)
       }
 
-      #[quickcheck]
-      fn test_put_subscribe_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
-        $t::test_put_subscribe_values_qc(kvs)
+      #[test]
+      fn test_put_subscribe_values_qc() {
+        ::quickcheck::quickcheck($t::test_put_subscribe_values_qc as fn(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError>)
       }
 
-      #[quickcheck]
-      fn test_put_subscribe_values_per_space(kvs: Vec<(bool, Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
-        $t::test_put_subscribe_values_per_space(kvs)
+      #[test]
+      fn test_put_subscribe_values_per_space() {
+        ::quickcheck::quickcheck($t::test_put_subscribe_values_per_space as fn (kvs: Vec<(bool, Vec<u8>, Vec<u8>)>) -> Result<bool, YakError>)
       }
 
-      #[quickcheck]
-      fn test_put_async_subscribe_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
-        $t::test_put_async_subscribe_values_qc(kvs)
+      #[test]
+      fn test_put_async_subscribe_values_qc() {
+        ::quickcheck::quickcheck($t::test_put_async_subscribe_values_qc as fn(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError>)
       }
     }
   }
