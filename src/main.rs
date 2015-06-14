@@ -105,7 +105,7 @@ fn do_run() -> Result<(), ServerError> {
     let store = store.clone();
     let sock = stream.unwrap();
     let peer = sock.peer_addr().unwrap();
-    let _ = try!(thread::Builder::new().name(format!("client-{}", peer)).spawn(move || {
+    let _ = try!(thread::Builder::new().name(format!("C{}", peer)).spawn(move || {
 	debug!("Accept stream from {:?}", peer);
         match Session::new(peer, sock, store, next).process_requests() {
           Err(e) => report_errors(&e),
