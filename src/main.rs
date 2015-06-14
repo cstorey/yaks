@@ -108,12 +108,19 @@ fn do_run() -> Result<(), ServerError> {
     let _ = try!(thread::Builder::new().name(format!("client-{}", peer)).spawn(move || {
 	debug!("Accept stream from {:?}", peer);
         match Session::new(peer, sock, store, next).process_requests() {
-          Err(e) => panic!("Processing requests failed: {}", e),
+          Err(e) => report_errors(&e),
           _ => ()
         }
       }));
   }
   Ok(())
+}
+
+fn report_errors(error: &Error) {
+  error!("Error: {}", error);
+  while let Some(error) = error.cause() {
+    error!("\tCaused by: {}", error);
+  }
 }
 
 impl DownStream<TcpStream> {
