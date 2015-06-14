@@ -15,7 +15,6 @@ use std::thread;
 use std::io::{self,Read,Write};
 use std::fmt;
 use std::sync::{Arc,Mutex};
-use std::collections::HashMap;
 use std::clone::Clone;
 use std::error::Error;
 

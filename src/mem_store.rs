@@ -1,14 +1,9 @@
-use std::default::Default;
-use std::net::{TcpListener, TcpStream};
-use std::thread;
-use std::io::{self,Read,Write};
 use std::fmt;
 use std::sync::{Arc,Mutex, Condvar};
 use std::collections::BTreeMap;
 use std::clone::Clone;
-use std::error::Error;
 
-use yak_client::{Datum,YakError};
+use yak_client::Datum;
 
 use store::{Store,Key, Val, Values};
 
@@ -57,7 +52,7 @@ impl fmt::Debug for MemInner {
 }
 impl fmt::Debug for MemStoreIter {
   fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-    let mut inner = self.inner.lock().unwrap();
+    let inner = self.inner.lock().unwrap();
     fmt.debug_struct("Foo")
       .field("inner", &*inner)
       .field("off", &self.off)
@@ -145,7 +140,7 @@ mod test {
   use super::MemStore;
   use store::test::TestableStore;
   use quickcheck::TestResult;
-  use yak_client::{Datum,YakError};
+  use yak_client::YakError;
 
   impl TestableStore for MemStore {
     fn build() -> MemStore {

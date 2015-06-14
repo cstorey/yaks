@@ -86,7 +86,7 @@ fn test_truncate() {
 fn test_subscribe_after_put_single_value() {
   static TEST_NAME: &'static str = "test_subscribe_after_put_single_value";
   log_init();
-  let (mut head, mut tail) = open_client(TEST_NAME);
+  let (mut head, tail) = open_client(TEST_NAME);
   let key = b"key";
   let val = b"value";
   head.truncate().unwrap();
@@ -102,7 +102,7 @@ fn test_subscribe_after_put_single_value() {
 fn test_subscribe_async_deliveries() {
   static TEST_NAME: &'static str = "test_subscribe_async_deliveries";
   log_init();
-  let (mut head, mut tail) = open_client(TEST_NAME);
+  let (mut head, tail) = open_client(TEST_NAME);
   let key = b"key";
   let val = b"value";
   head.truncate().unwrap();

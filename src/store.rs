@@ -1,15 +1,6 @@
 extern crate quickcheck;
-use std::default::Default;
-use std::net::{TcpListener, TcpStream};
-use std::thread;
-use std::io::{self,Read,Write};
-use std::fmt;
-use std::sync::{Arc,Mutex, Condvar};
-use std::collections::BTreeMap;
-use std::clone::Clone;
-use std::error::Error;
 
-use yak_client::{Datum,YakError};
+use yak_client::Datum;
 
 pub type Key = (String, Vec<u8>);
 pub type Val = Vec<u8>;
@@ -28,9 +19,8 @@ pub trait Store {
 pub mod test {
   use super::*;
   use std::thread;
-  use std::sync::{Arc, Mutex, Barrier, Once, ONCE_INIT};
-  use yak_client::{Datum,YakError};
-  use env_logger;
+  use std::sync::{Arc, Barrier, Once, ONCE_INIT};
+  use yak_client::YakError;
   use quickcheck::TestResult;
   use log4rs;
 
@@ -48,7 +38,7 @@ pub mod test {
     fn build() -> Self;
     fn test_put_read_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>, needle_sel: usize) -> Result<TestResult, YakError> {
       log_init();
-      let mut store = Self::build();
+      let store = Self::build();
 
       let space = "X";
       for &(ref key, ref val) in &kvs {
@@ -73,7 +63,7 @@ pub mod test {
 
     fn test_put_subscribe_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
       log_init();
-      let mut store = Self::build();
+      let store = Self::build();
 
       let space = "test_put_subscribe_values_qc";
       for &(ref key, ref val) in &kvs {
@@ -90,7 +80,7 @@ pub mod test {
 
     fn test_put_subscribe_values_per_space(kvs: Vec<(bool, Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
       log_init();
-      let mut store = Self::build();
+      let store = Self::build();
 
       let space_prefix = "test_put_subscribe_values_qc";
       for &(ref space_suff, ref key, ref val) in &kvs {
@@ -115,16 +105,15 @@ pub mod test {
       log_init();
       static TEST_NAME : &'static str = "test_put_async_subscribe_values_qc";
 
-      let mut store = Self::build();
+      let store = Self::build();
       let space = TEST_NAME;
       let barrier = Arc::new(Barrier::new(2));
       let builder = thread::Builder::new().name(format!("{}::subscriber", thread::current().name().unwrap_or(TEST_NAME)));
 
-      let b = barrier.clone();
       let expected_items = kvs.len();
 
       let child = builder.scoped(|| {
-          let mut sub = store.subscribe(&space);
+          let sub = store.subscribe(&space);
           barrier.wait();
           sub.take(expected_items).map(|d| (d.key, d.content) ).collect()
           }).unwrap();
