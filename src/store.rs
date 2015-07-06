@@ -1,17 +1,24 @@
 extern crate quickcheck;
 
+use std::error::Error;
+use std::any::Any;
 use yak_client::Datum;
 
 pub type Key = (String, Vec<u8>);
 pub type Val = Vec<u8>;
 pub type Values = Vec<Val>;
 
-pub trait Store {
+pub trait Store : Clone {
   type Iter: Iterator<Item=Datum>;
-  fn truncate(&self, space: &str);
-  fn read(&self, space: &str, key: &[u8]) -> Values;
-  fn write(&self, space: &str, key: &[u8], val: &[u8]);
-  fn subscribe(&self, space: &str) -> Self::Iter ;
+  type Error: Error + Any + Send + 'static;
+  fn truncate(&self, space: &str) -> Result<(), Self::Error>;
+  fn read(&self, space: &str, key: &[u8]) -> Result<Values, Self::Error>;
+  fn write(&self, space: &str, key: &[u8], val: &[u8]) -> Result<(), Self::Error>;
+  fn subscribe(&self, space: &str) -> Result<Self::Iter, Self::Error> ;
+}
+
+macro_rules! try_as_any {
+    ($expr:expr) => { try!($expr.map_err(|e| Box::new(e) as Box<Any + Send>)) }
 }
 
 #[cfg(test)]
@@ -20,6 +27,8 @@ pub mod test {
   use super::*;
   use std::thread;
   use std::sync::{Arc, Barrier, Once, ONCE_INIT};
+  use std::error::Error;
+  use std::any::Any;
   use yak_client::YakError;
   use quickcheck::TestResult;
   use log4rs;
@@ -33,16 +42,17 @@ pub mod test {
     })
   }
 
+  type BoxedError = Box<Any + Send>;
 
-  pub trait TestableStore : Store + Sync + Sized + Send + 'static + Clone {
+  pub trait TestableStore : Store + Sync + Sized + Send + 'static {
     fn build() -> Self;
-    fn test_put_read_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>, needle_sel: usize) -> Result<TestResult, YakError> {
+    fn test_put_read_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>, needle_sel: usize) -> Result<TestResult, BoxedError> {
       log_init();
       let store = Self::build();
 
       let space = "X";
       for &(ref key, ref val) in &kvs {
-        store.write(&space, &key, &val);
+        try_as_any!(store.write(&space, &key, &val))
       }
 
       if kvs.len() > 0 {
@@ -51,7 +61,7 @@ pub mod test {
           .filter_map(|&(ref k, ref v)| if k == needle { Some(v.clone()) } else { None })
           .collect();
 
-        let actual : Vec<_> = store.read(&space, &needle);
+        let actual : Vec<_> = try_as_any!(store.read(&space, &needle));
         debug!("Got     : {:?}", actual);
         debug!("Expected: {:?}", expected);
         debug!("Ok?     : {:?}", expected == actual);
@@ -61,36 +71,36 @@ pub mod test {
       }
     }
 
-    fn test_put_subscribe_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
+    fn test_put_subscribe_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, BoxedError> {
       log_init();
       let store = Self::build();
 
       let space = "test_put_subscribe_values_qc";
       for &(ref key, ref val) in &kvs {
-        store.write(&space, &key, &val);
+        try_as_any!(store.write(&space, &key, &val));
       }
 
       debug!("Expected: {:?}", kvs);
-      let actual : Vec<_> = store.subscribe(&space).take(kvs.len()).map(|d| (d.key, d.content) ).collect();
+      let actual : Vec<_> = try_as_any!(store.subscribe(&space)).take(kvs.len()).map(|d| (d.key, d.content) ).collect();
 
       debug!("Got     : {:?}", actual);
       debug!("Ok?     : {:?}", kvs == actual);
       Ok(kvs == actual)
     }
 
-    fn test_put_subscribe_values_per_space(kvs: Vec<(bool, Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
+    fn test_put_subscribe_values_per_space(kvs: Vec<(bool, Vec<u8>, Vec<u8>)>) -> Result<bool, BoxedError> {
       log_init();
       let store = Self::build();
 
       let space_prefix = "test_put_subscribe_values_qc";
       for &(ref space_suff, ref key, ref val) in &kvs {
         let space = format!("{}/{}", space_prefix, space_suff);
-        store.write(&space, &key, &val);
+        try_as_any!(store.write(&space, &key, &val));
       }
 
       let expected : Vec<_> = kvs.iter().filter_map(|x| if x.0 { Some(x.clone()) } else { None }).collect();
 
-      let actual : Vec<_> = store.subscribe(&format!("{}/{}", space_prefix, true))
+      let actual : Vec<_> = try_as_any!(store.subscribe(&format!("{}/{}", space_prefix, true)))
         .take(expected.len())
         .map(|d| (true, d.key, d.content) )
         .collect();
@@ -101,7 +111,7 @@ pub mod test {
       Ok(expected == actual)
     }
 
-    fn test_put_async_subscribe_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError> {
+    fn test_put_async_subscribe_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, BoxedError> {
       log_init();
       static TEST_NAME : &'static str = "test_put_async_subscribe_values_qc";
 
@@ -116,7 +126,7 @@ pub mod test {
         let barrier = barrier.clone();
         let store = store.clone();
         builder.spawn(move || {
-            let sub = store.subscribe(&space);
+            let sub = store.subscribe(&space).unwrap();
             barrier.wait();
             sub.take(expected_items).map(|d| (d.key, d.content) ).collect()
           }).unwrap()
@@ -125,10 +135,10 @@ pub mod test {
       barrier.wait();
       for &(ref key, ref val) in &kvs {
         debug!("Write:{:?}={:?}", key, val);
-        store.write(&space, &key, &val);
+        try_as_any!(store.write(&space, &key, &val));
       }
 
-      let actual : Vec<_> = child.join().unwrap();
+      let actual : Vec<_> = try!(child.join());
       debug!("Got     : {:?}", actual);
       debug!("Expected: {:?}", kvs);
       debug!("Ok?     : {:?}", kvs == actual);
@@ -140,22 +150,22 @@ pub mod test {
     ($t:ident) => {
       #[test]
       fn test_put_read_values_qc() {
-        ::quickcheck::quickcheck($t::test_put_read_values_qc as fn (kvs: Vec<(Vec<u8>, Vec<u8>)>, needle_sel: usize) -> Result<TestResult, YakError>)
+        ::quickcheck::quickcheck($t::test_put_read_values_qc as fn (kvs: Vec<(Vec<u8>, Vec<u8>)>, needle_sel: usize) -> Result<TestResult, Box<::std::any::Any+Send>>)
       }
 
       #[test]
       fn test_put_subscribe_values_qc() {
-        ::quickcheck::quickcheck($t::test_put_subscribe_values_qc as fn(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError>)
+        ::quickcheck::quickcheck($t::test_put_subscribe_values_qc as fn(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, Box<::std::any::Any+Send>>)
       }
 
       #[test]
       fn test_put_subscribe_values_per_space() {
-        ::quickcheck::quickcheck($t::test_put_subscribe_values_per_space as fn (kvs: Vec<(bool, Vec<u8>, Vec<u8>)>) -> Result<bool, YakError>)
+        ::quickcheck::quickcheck($t::test_put_subscribe_values_per_space as fn (kvs: Vec<(bool, Vec<u8>, Vec<u8>)>) -> Result<bool, Box<::std::any::Any+Send>>)
       }
 
       #[test]
       fn test_put_async_subscribe_values_qc() {
-        ::quickcheck::quickcheck($t::test_put_async_subscribe_values_qc as fn(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, YakError>)
+        ::quickcheck::quickcheck($t::test_put_async_subscribe_values_qc as fn(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, Box<::std::any::Any+Send>>)
       }
     }
   }

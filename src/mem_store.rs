@@ -2,6 +2,7 @@ use std::fmt;
 use std::sync::{Arc,Mutex, Condvar};
 use std::collections::BTreeMap;
 use std::clone::Clone;
+use std::error::Error;
 
 use yak_client::Datum;
 
@@ -26,6 +27,22 @@ struct MemStoreIter {
   off: usize,
   space: String,
 }
+
+#[derive(Debug)]
+struct MemError;
+
+impl fmt::Display for MemError {
+  fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    write!(fmt, "MemError")
+  }
+}
+
+impl Error for MemError {
+  fn description(&self) -> &str {
+    "In memory error"
+  }
+}
+
 
 impl MemStore {
   pub fn new() -> MemStore {
@@ -65,8 +82,9 @@ impl fmt::Debug for MemStoreIter {
 
 impl Store for MemStore {
   type Iter = MemStoreIter;
+  type Error = MemError;
 
-  fn truncate(&self, space: &str) {
+  fn truncate(&self, space: &str) -> Result<(), MemError> {
     let mut inner = self.inner.lock().unwrap();
     let to_rm : Vec<_> = inner.by_key.iter().filter_map(|(k, v)| if k.0 == space { Some((k.clone(), v.clone())) } else { None }).collect();
     for (k, vs) in to_rm {
@@ -75,20 +93,22 @@ impl Store for MemStore {
         inner.vals.remove(&v);
       }
     }
+    Ok(())
   }
 
-  fn read(&self, space: &str, key: &[u8]) -> Values {
+  fn read(&self, space: &str, key: &[u8]) -> Result<Values, MemError> {
     let inner = self.inner.lock().unwrap();
     let k = (space.into(), key.into());
-    inner.by_key.get(&k)
+    let res = inner.by_key.get(&k)
       .map(|idxs|
           idxs.iter().filter_map(|i|
             inner.vals.get(i).iter().map(|&&(_, ref v)| v.clone()).next()
             ).collect() )
-      .unwrap_or(vec![])
+      .unwrap_or(vec![]);
+    Ok(res)
   }
 
-  fn write(&self, space: &str, key: &[u8], val: &[u8]) {
+  fn write(&self, space: &str, key: &[u8], val: &[u8]) -> Result<(), MemError> {
     let mut inner = self.inner.lock().unwrap();
     let k = (space.into(), key.into());
     let idx = inner.idx;
@@ -100,10 +120,11 @@ impl Store for MemStore {
     inner.idx += 1;
     debug!("Wrote @{}", inner.idx);
     self.cvar.notify_all();
+    Ok(())
   }
 
-  fn subscribe(&self, space: &str) -> Self::Iter {
-    MemStoreIter { inner: self.inner.clone(), cvar: self.cvar.clone(), off: 0, space: space.to_string() }
+  fn subscribe(&self, space: &str) -> Result<Self::Iter, MemError> {
+    Ok(MemStoreIter { inner: self.inner.clone(), cvar: self.cvar.clone(), off: 0, space: space.to_string() })
   }
 }
 

@@ -19,13 +19,24 @@ use yak_client::{WireProtocol,Request,Response,Operation,Datum,YakError};
 
 #[macro_use] mod store;
 mod mem_store;
+mod lmdb_store;
+
+macro_rules! try_box {
+    ($expr:expr) => (match $expr {
+        Ok(val) => val,
+        Err(err) => {
+            return Err(From::from(Box::new(err) as Box<Error + 'static>))
+        }
+    })
+}
 
 #[derive(Debug)]
 enum ServerError {
   CapnpError(capnp::Error),
   CapnpNotInSchema(capnp::NotInSchema),
   IoError(std::io::Error),
-  DownstreamError(YakError)
+  DownstreamError(YakError),
+  StoreError(Box<Error>),
 }
 
 impl fmt::Display for ServerError {
@@ -34,7 +45,8 @@ impl fmt::Display for ServerError {
       &ServerError::CapnpError(ref e) => e.fmt(f),
       &ServerError::CapnpNotInSchema(ref e) => e.fmt(f),
       &ServerError::IoError(ref e) => e.fmt(f),
-      &ServerError::DownstreamError(ref e) => e.fmt(f)
+      &ServerError::DownstreamError(ref e) => e.fmt(f),
+      &ServerError::StoreError(ref e) => write!(f, "{}", e),
     }
   }
 }
@@ -45,7 +57,8 @@ impl Error for ServerError {
       &ServerError::CapnpError(ref e) => e.description(),
       &ServerError::CapnpNotInSchema(ref e) => e.description(),
       &ServerError::IoError(ref e) => e.description(),
-      &ServerError::DownstreamError(ref e) => e.description()
+      &ServerError::DownstreamError(ref e) => e.description(),
+      &ServerError::StoreError(ref e) => e.description(),
     }
   }
 }
@@ -120,7 +133,7 @@ fn report_errors(error: &Error) {
 impl DownStream<TcpStream> {
   fn new(addr: &str) -> Result<DownStream<TcpStream>, ServerError> {
     debug!("Connect downstream: {:?}", addr);
-    let proto = try!(WireProtocol::connect(addr));
+    let proto = try_box!(WireProtocol::connect(addr));
     debug!("Connected downstream: {:?}", proto);
 
     Ok(DownStream { protocol: Arc::new(Mutex::new(proto)) })
@@ -200,12 +213,12 @@ impl<Id: fmt::Display, S: Read+Write, ST:store::Store> Session<Id, S, ST> {
 
   fn truncate(&self, space: &str) -> Result<Response, ServerError> {
     trace!("{}/{:?}: truncate", self.id, space);
-    self.store.truncate(space);
+    try_box!(self.store.truncate(space));
     Ok(Response::Okay)
   }
 
   fn read(&self, space: &str, key: &[u8]) -> Result<Response, ServerError> {
-    let val = self.store.read(space, key);
+    let val = try_box!(self.store.read(space, key));
     trace!("{}/{:?}: read:{:?}: -> {:?}", self.id, space, key, val);
     let data = val.iter().map(|c| Datum { key: Vec::new(), content: c.clone() }).collect();
     Ok(Response::OkayData(data))
@@ -213,12 +226,12 @@ impl<Id: fmt::Display, S: Read+Write, ST:store::Store> Session<Id, S, ST> {
 
   fn write(&self, space: &str, key: &[u8], val: &[u8]) -> Result<Response, ServerError> {
     trace!("{}/{:?}: write:{:?} -> {:?}", self.id, space, key, val);
-    self.store.write(space, key, val);
+    try_box!(self.store.write(space, key, val));
     Ok(Response::Okay)
   }
   fn subscribe(&mut self, space: &str) -> Result<(), ServerError> {
     try!(self.protocol.send(&Response::Okay));
-    for d in self.store.subscribe(space) {
+    for d in try_box!(self.store.subscribe(space)) {
       try!(self.protocol.send(&Response::Delivery(d)));
     }
     Ok(())
@@ -246,5 +259,11 @@ impl From<io::Error> for ServerError {
 impl From<YakError> for ServerError {
   fn from(err: YakError) -> ServerError {
     ServerError::DownstreamError(err)
+  }
+}
+
+impl From<Box<Error>> for ServerError {
+  fn from(err: Box<Error>) -> ServerError {
+    ServerError::StoreError(err)
   }
 }
