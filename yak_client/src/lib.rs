@@ -1,14 +1,14 @@
- #![feature(buf_stream)]
-
 #[macro_use]
 extern crate log;
 extern crate url;
+extern crate bufstream;
 extern crate capnp;
 
 mod yak_capnp;
 
 use std::net::{TcpStream,ToSocketAddrs};
-use std::io::{self,BufStream,BufRead,Write};
+use bufstream::BufStream;
+use std::io::{self,BufRead,Write};
 use std::fmt;
 use std::error::Error;
 use capnp::serialize_packed;

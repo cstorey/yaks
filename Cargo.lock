@@ -13,6 +13,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "bufstream"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "byteorder"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -132,6 +137,7 @@ dependencies = [
 name = "yak_client"
 version = "0.1.0"
 dependencies = [
+ "bufstream 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "capnp 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "capnpc 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",

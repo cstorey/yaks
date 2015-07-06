@@ -34,7 +34,7 @@ pub mod test {
   }
 
 
-  pub trait TestableStore : Store + Sync + Sized {
+  pub trait TestableStore : Store + Sync + Sized + Send + 'static + Clone {
     fn build() -> Self;
     fn test_put_read_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>, needle_sel: usize) -> Result<TestResult, YakError> {
       log_init();
@@ -112,11 +112,15 @@ pub mod test {
 
       let expected_items = kvs.len();
 
-      let child = builder.scoped(|| {
-          let sub = store.subscribe(&space);
-          barrier.wait();
-          sub.take(expected_items).map(|d| (d.key, d.content) ).collect()
-          }).unwrap();
+      let child = {
+        let barrier = barrier.clone();
+        let store = store.clone();
+        builder.spawn(move || {
+            let sub = store.subscribe(&space);
+            barrier.wait();
+            sub.take(expected_items).map(|d| (d.key, d.content) ).collect()
+          }).unwrap()
+      };
 
       barrier.wait();
       for &(ref key, ref val) in &kvs {
@@ -124,7 +128,7 @@ pub mod test {
         store.write(&space, &key, &val);
       }
 
-      let actual : Vec<_> = child.join();
+      let actual : Vec<_> = child.join().unwrap();
       debug!("Got     : {:?}", actual);
       debug!("Expected: {:?}", kvs);
       debug!("Ok?     : {:?}", kvs == actual);

@@ -1,5 +1,3 @@
-#![feature(convert, scoped)]
-
 #[macro_use]
 extern crate log;
 extern crate log4rs;
@@ -111,7 +109,7 @@ fn test_subscribe_async_deliveries() {
 
   let builder = thread::Builder::new().name(format!("{}::subscriber", thread::current().name().unwrap_or(TEST_NAME)));
   let b = barrier.clone();
-  let sub_task = builder.scoped(move || {
+  let sub_task = builder.spawn(move || {
     debug!("Starting subscriber");
     let mut subscription = tail.subscribe().unwrap();
     debug!("Await barrier");
@@ -127,7 +125,7 @@ fn test_subscribe_async_deliveries() {
   debug!("Write value");
   head.write(key, val).unwrap();
 
-  let maybe_message = sub_task.join();
+  let maybe_message = sub_task.join().unwrap();
 
   assert_eq!(maybe_message.map(|message| (message.key, message.content)), Some((key.to_vec(), val.to_vec())))
 }

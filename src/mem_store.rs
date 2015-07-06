@@ -43,21 +43,23 @@ impl MemStore {
 
 impl fmt::Debug for MemInner {
   fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-    fmt.debug_struct("Foo")
-      .field("nkeys", &self.by_key.len())
-      .field("nvals", &self.vals.len())
-      .field("idx", &self.idx)
-      .finish()
+    write!(fmt,
+        "MemInner{{ nkeys:{:?}, nvals:{:?}, idx:{:?} }}",
+        &self.by_key.len(),
+      &self.vals.len(),
+      &self.idx)
   }
 }
 impl fmt::Debug for MemStoreIter {
   fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-    let inner = self.inner.lock().unwrap();
-    fmt.debug_struct("Foo")
-      .field("inner", &*inner)
-      .field("off", &self.off)
-      .field("space", &self.space)
-      .finish()
+    match self.inner.try_lock() {
+      Ok(ref inner) =>
+        write!(fmt, "MemStoreIter{{inner:{:?}, off:{:?}, space:{:?} }}",
+          &**inner, &self.off, &self.space),
+      Err(_) =>
+        write!(fmt, "MemStoreIter{{inner: ???, off:{:?}, space:{:?} }}",
+          &self.off, &self.space)
+    }
   }
 }
 

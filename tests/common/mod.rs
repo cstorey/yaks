@@ -4,7 +4,7 @@ use yak_client::Client;
 
 pub fn open_from_env(env_var: &str, name: &str) -> Client {
   let yak_url = env::var(env_var).ok()
-    .expect(format!("env var {} not found", env_var).as_str());
+    .expect(&format!("env var {} not found", env_var));
   let full_url = format!("{}-{}", yak_url, name);
   Client::connect(&full_url).unwrap()
 }

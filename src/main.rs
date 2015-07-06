@@ -1,6 +1,3 @@
-#![feature(plugin)]
-#![feature(scoped)]
-#![feature(convert)]
 #[macro_use] extern crate log;
 extern crate env_logger;
 extern crate yak_client;
@@ -60,10 +57,9 @@ struct DownStream<S: Read+Write> {
 impl <S: ::std::fmt::Debug + Read + Write> ::std::fmt::Debug for DownStream<S>
  where S: ::std::fmt::Debug + 'static {
     fn fmt(&self, fmt: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        match self {
-            &DownStream { protocol: ref proto } =>
-            fmt.debug_struct("DownStream").field("protocol",
-                                                     (proto)).finish(),
+        match self.protocol.try_lock() {
+            Ok(ref proto) => write!(fmt, "DownStream{{ protocol: {:?} }}", &**proto),
+            Err(_) => write!(fmt, "DownStream{{ protocol: <locked> }}"),
         }
     }
 }
@@ -95,7 +91,7 @@ fn do_run() -> Result<(), ServerError> {
       None => None
   };
 
-  let listener = TcpListener::bind(local.as_str()).unwrap();
+  let listener = TcpListener::bind(&local as &str).unwrap();
   info!("listening started on {}, ready to accept", local);
   let store = mem_store::MemStore::new();
   for stream in listener.incoming() {
