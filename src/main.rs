@@ -3,8 +3,11 @@ extern crate env_logger;
 extern crate yak_client;
 extern crate capnp;
 extern crate log4rs;
+extern crate lmdb_rs as lmdb;
 #[cfg(test)]
 extern crate quickcheck;
+#[cfg(test)]
+extern crate rand;
 
 use std::default::Default;
 use std::net::{TcpListener, TcpStream};
