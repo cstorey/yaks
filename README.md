@@ -13,5 +13,8 @@ High Throughput and Availability](http://www.cs.cornell.edu/fbs/publications%5CC
  * [Chain Replication in Theory and in Practice](http://www.snookles.com/scott/publications/erlang2010-slf.pdf)
  * [Object storage on CRAQ](https://www.usenix.org/legacy/event/usenix09/tech/full_papers/terrace/terrace.pdf)
  * [ChainReaction](http://eurosys2013.tudos.org/wp-content/uploads/2013/paper/Almeida.pdf)
- * [The Potential Dangers of Causal Consistency
-and an Explicit Solution](http://db.cs.berkeley.edu/papers/socc12-explicit.pdf)
+ * [The Potential Dangers of Causal Consistency and an Explicit Solution](http://db.cs.berkeley.edu/papers/socc12-explicit.pdf)
+ * [Machi](https://github.com/basho/machi/)
+ * [Humming Consensus](https://github.com/basho/machi/blob/master/doc/high-level-chain-mgr.pdf)
+ * [Leveraging Sharding in the Design of
+Scalable Replication Protocols](http://www.ymsir.com/papers/sharding-socc.pdf)
