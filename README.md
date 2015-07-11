@@ -1,6 +1,7 @@
-[![Stories in Ready](https://badge.waffle.io/cstorey/yaks.png?label=ready&title=Ready)](https://waffle.io/cstorey/yaks)
 YakMQ
 =====
+
+[![Stories in Ready](https://badge.waffle.io/cstorey/yaks.png?label=ready&title=Ready)](https://waffle.io/cstorey/yaks)
 
 This is intended to be an experimental message bus with a defined consistency model, albeit more inspired by Kafka than RabbitMQ.
 
