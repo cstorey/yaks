@@ -163,7 +163,6 @@ mod test {
   use super::MemStore;
   use store::test::TestableStore;
   use quickcheck::TestResult;
-  use yak_client::YakError;
 
   impl TestableStore for MemStore {
     fn build() -> MemStore {

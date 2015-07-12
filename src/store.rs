@@ -18,7 +18,7 @@ pub trait Store : Clone {
 }
 
 macro_rules! try_as_any {
-    ($expr:expr) => { try!($expr.map_err(|e| Box::new(e) as Box<Any + Send>)) }
+    ($expr:expr) => { try!($expr.map_err(|e| { error!("Error: {}", e); Box::new(e) as Box<Any + Send>} )) }
 }
 
 #[cfg(test)]
@@ -27,9 +27,7 @@ pub mod test {
   use super::*;
   use std::thread;
   use std::sync::{Arc, Barrier, Once, ONCE_INIT};
-  use std::error::Error;
   use std::any::Any;
-  use yak_client::YakError;
   use quickcheck::TestResult;
   use log4rs;
 
@@ -52,15 +50,19 @@ pub mod test {
 
       let space = "X";
       for &(ref key, ref val) in &kvs {
-        try_as_any!(store.write(&space, &key, &val))
+        trace!("Write val: {:?}/{:?}={:?}", &space, &key, &val);
+        try_as_any!(store.write(&space, &key, &val));
+        trace!("Wrote val: {:?}/{:?}={:?}", &space, &key, &val);
       }
 
       if kvs.len() > 0 {
         let (ref needle, _) = kvs[needle_sel % kvs.len()];
+        trace!("Needle: {:?}", needle);
         let expected : Vec<super::Val> = kvs.iter()
           .filter_map(|&(ref k, ref v)| if k == needle { Some(v.clone()) } else { None })
           .collect();
 
+        trace!("Reading: {:?}/{:?}", &space, &needle);
         let actual : Vec<_> = try_as_any!(store.read(&space, &needle));
         debug!("Got     : {:?}", actual);
         debug!("Expected: {:?}", expected);
@@ -90,6 +92,7 @@ pub mod test {
 
     fn test_put_subscribe_values_per_space(kvs: Vec<(bool, Vec<u8>, Vec<u8>)>) -> Result<bool, BoxedError> {
       log_init();
+      debug!("Data    : {:?}", kvs);
       let store = Self::build();
 
       let space_prefix = "test_put_subscribe_values_qc";
@@ -104,7 +107,6 @@ pub mod test {
         .take(expected.len())
         .map(|d| (true, d.key, d.content) )
         .collect();
-      debug!("Data    : {:?}", kvs);
       debug!("Got     : {:?}", actual);
       debug!("Expected: {:?}", expected);
       debug!("Ok?     : {:?}", expected == actual);
@@ -112,13 +114,19 @@ pub mod test {
     }
 
     fn test_put_async_subscribe_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, BoxedError> {
+      use rand::{thread_rng, Rng};
       log_init();
       static TEST_NAME : &'static str = "test_put_async_subscribe_values_qc";
+
+      debug!("-------------------------------------------------------------------------------");
 
       let store = Self::build();
       let space = TEST_NAME;
       let barrier = Arc::new(Barrier::new(2));
-      let builder = thread::Builder::new().name(format!("{}::subscriber", thread::current().name().unwrap_or(TEST_NAME)));
+      let mut rng = thread_rng();
+      let tname = format!("{}::subscriber-{}", thread::current().name().unwrap_or(TEST_NAME), rng.gen_ascii_chars().take(4).collect::<String>());
+      debug!("Subscriber thread: {}", tname);
+      let builder = thread::Builder::new().name(tname);
 
       let expected_items = kvs.len();
 

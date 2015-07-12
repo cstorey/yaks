@@ -3,7 +3,8 @@ extern crate env_logger;
 extern crate yak_client;
 extern crate capnp;
 extern crate log4rs;
-extern crate lmdb_rs as lmdb;
+extern crate sqlite3;
+extern crate byteorder;
 #[cfg(test)]
 extern crate quickcheck;
 #[cfg(test)]
@@ -22,7 +23,7 @@ use yak_client::{WireProtocol,Request,Response,Operation,Datum,YakError};
 
 #[macro_use] mod store;
 mod mem_store;
-mod lmdb_store;
+mod sqlite_store;
 
 macro_rules! try_box {
     ($expr:expr) => (match $expr {
