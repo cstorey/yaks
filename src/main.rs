@@ -18,6 +18,7 @@ use std::fmt;
 use std::sync::{Arc,Mutex};
 use std::clone::Clone;
 use std::error::Error;
+use std::path::Path;
 
 use yak_client::{WireProtocol,Request,Response,Operation,Datum,YakError};
 
@@ -102,6 +103,7 @@ pub fn main() {
 
 fn do_run() -> Result<(), ServerError> {
   let mut a = std::env::args().skip(1);
+  let storedir = a.next().unwrap();
   let local : String = a.next().unwrap();
   let next = match a.next() {
       Some(ref addr) => Some(try!(DownStream::new(addr))),
@@ -110,7 +112,7 @@ fn do_run() -> Result<(), ServerError> {
 
   let listener = TcpListener::bind(&local as &str).unwrap();
   info!("listening started on {}, ready to accept", local);
-  let store = mem_store::MemStore::new();
+  let store = sqlite_store::SqliteStore::new(Path::new(&storedir)).unwrap();
   for stream in listener.incoming() {
     let next = next.clone();
     let store = store.clone();

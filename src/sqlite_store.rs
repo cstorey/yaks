@@ -11,7 +11,7 @@ use sqlite3::{self, DatabaseConnection, ResultRowAccess};
 type SeqCVar = Arc<(Mutex<i64>, Condvar)>;
 
 #[derive(Clone)]
-struct SqliteStore {
+pub struct SqliteStore {
   path:  PathBuf,
   seqnotify: SeqCVar
 }
@@ -87,7 +87,16 @@ impl Store for SqliteStore {
   type Iter = SqliteIterator;
   type Error = SqliteError;
 
-  fn truncate(&self, _space: &str) -> Result<(), SqliteError> {
+  fn truncate(&self, space: &str) -> Result<(), SqliteError> {
+    let db = try!(self.open_db());
+    {
+      let sql = "DELETE FROM logs WHERE space = ?1";
+      trace!("{}@[{:?}]", sql, space);
+      let mut stmt = try!(db.prepare(sql));
+      try!(stmt.bind_text(1, space));
+      let mut results = stmt.execute();
+      while let Some(_) = try!(results.step()) { }
+    }
     Ok(())
   }
 
