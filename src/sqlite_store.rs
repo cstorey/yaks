@@ -175,12 +175,14 @@ impl Store for SqliteStore {
 }
 
 fn retry_on_locked<T, F>(mut f: F) -> Result<T, sqlite3::SqliteError> where F: FnMut() -> Result<T, sqlite3::SqliteError> {
+  let mut backoff = 1;
   loop {
     let r = f();
     match r { 
       Err(sqlite3::SqliteError { kind, .. }) if kind == sqlite3::SqliteErrorCode::SQLITE_LOCKED || kind == sqlite3::SqliteErrorCode::SQLITE_BUSY => {
-        trace!("retry-redo: {:?}", kind);
-        thread::sleep_ms(1);
+        debug!("retry-redo: {:?}; sleep: {}ms", kind, backoff);
+        thread::sleep_ms(backoff);
+        backoff <<= 1;
       },
       Ok(_) => return r,
       Err(e) => return Err(e),
@@ -244,7 +246,7 @@ impl Iterator for SqliteIterator {
 
 impl fmt::Debug for SqliteIterator {
   fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-    write!(fmt, "MemStoreIter{{ db: <db>, next_idx:{:?}, space:{:?} }}",
+    write!(fmt, "SqliteIterator{{ db: <db>, next_idx:{:?}, space:{:?} }}",
       &self.next_idx, &self.space)
   }
 }
