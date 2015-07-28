@@ -196,8 +196,8 @@ impl SqliteIterator {
     loop {
       let query = retry_on_locked(|| {
         let sql = "SELECT seq, key, value FROM logs WHERE space = ? AND seq = ? ORDER BY seq ASC /* LIMIT 1 */";
-        trace!("{}@[{}, {}]", sql, self.space, self.next_idx);
         let mut q = try!(self.db.prepare(sql));
+        trace!("{}@[{}, {}]", sql, self.space, self.next_idx);
         try!(q.bind_text(1, &self.space));
         try!(q.bind_int64(2, self.next_idx));
         let mut results = q.execute();
@@ -223,6 +223,7 @@ impl SqliteIterator {
         let &(ref lock, ref cvar) = &*self.seqnotify;
         trace!("Nothing found: @{:?}; waiting", self);
         let mut seq = lock.lock().unwrap();
+        trace!("Current seq: {:?}; db seq: {:?};", self.next_idx, *seq);
         while self.next_idx > *seq {
           trace!("Wait! want next-idx:{:?} > current:{:?}", &*seq, self.next_idx);
           let (lockp, _no_timeout) = cvar.wait_timeout_ms(seq, 1000).unwrap();
