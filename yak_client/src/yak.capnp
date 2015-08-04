@@ -25,11 +25,12 @@ struct Operation {
 
 struct ClientRequest {
   space @0: Text;
+  sequence@2: UInt64;
   operation@1: Operation;
 }
 
-
 struct ClientResponse {
+  sequence@3: UInt64;
   union {
     ok @0 : Void;
     okData @1 : List(Datum);

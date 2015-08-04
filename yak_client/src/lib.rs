@@ -11,6 +11,7 @@ use bufstream::BufStream;
 use std::io::{self,BufRead,Write};
 use std::fmt;
 use std::error::Error;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use capnp::serialize_packed;
 use capnp::{MessageBuilder, MessageReader, MallocMessageBuilder, ReaderOptions};
 
@@ -66,6 +67,7 @@ pub struct Datum {
 
 #[derive(Debug)]
 pub struct Request {
+  pub sequence: u64,
   pub space: String,
   pub operation: Operation,
 }
@@ -79,46 +81,50 @@ pub enum Operation {
 }
 
 impl Request {
-  fn truncate(space: &str) -> Request {
-    Request { space: space.to_string(), operation: Operation::Truncate }
+  fn truncate(seq: u64, space: &str) -> Request {
+    Request { sequence: seq, space: space.to_string(), operation: Operation::Truncate }
   }
 
-  fn read(space: &str, key: &[u8]) -> Request {
-    Request { space: space.to_string(), operation: Operation::Read { key: key.to_vec() } }
+  fn read(seq: u64, space: &str, key: &[u8]) -> Request {
+    Request { sequence: seq, space: space.to_string(), operation: Operation::Read { key: key.to_vec() } }
   }
 
-  fn write(space: &str, key: &[u8], value: &[u8]) -> Request {
-    Request { space: space.to_string(), operation: Operation::Write { key: key.to_owned(), value: value.to_owned() } }
+  fn write(seq: u64, space: &str, key: &[u8], value: &[u8]) -> Request {
+    Request { sequence: seq, space: space.to_string(), operation: Operation::Write { key: key.to_owned(), value: value.to_owned() } }
   }
 
-  fn subscribe(space: &str) -> Request {
-    Request { space: space.to_string(), operation: Operation::Subscribe }
+  fn subscribe(seq: u64, space: &str) -> Request {
+    Request { sequence: seq, space: space.to_string(), operation: Operation::Subscribe }
   }
 
-  fn encode_truncate<B: MessageBuilder>(message: &mut B, space: &str) {
+  fn encode_truncate<B: MessageBuilder>(message: &mut B, seq: u64, space: &str) {
     let mut rec = message.init_root::<client_request::Builder>();
+    rec.set_sequence(seq);
     rec.set_space(space);
     let mut op = rec.init_operation();
     op.set_truncate(())
   }
 
-  fn encode_write<B: MessageBuilder>(message: &mut B, space: &str, key: &[u8], val: &[u8]) {
+  fn encode_write<B: MessageBuilder>(message: &mut B, seq: u64, space: &str, key: &[u8], val: &[u8]) {
     let mut rec = message.init_root::<client_request::Builder>();
+    rec.set_sequence(seq);
     rec.set_space(space);
     let mut req = rec.init_operation().init_write();
     req.set_key(key);
     req.set_value(val);
   }
 
-  fn encode_read<B: MessageBuilder>(message: &mut B, space: &str, key: &[u8]) {
+  fn encode_read<B: MessageBuilder>(message: &mut B, seq: u64, space: &str, key: &[u8]) {
     let mut rec = message.init_root::<client_request::Builder>();
+    rec.set_sequence(seq);
     rec.set_space(space);
     let mut req = rec.init_operation().init_read();
     req.set_key(key)
   }
 
-  fn encode_subscribe<B: MessageBuilder>(message: &mut B, space: &str) {
+  fn encode_subscribe<B: MessageBuilder>(message: &mut B, seq: u64, space: &str) {
     let mut rec = message.init_root::<client_request::Builder>();
+    rec.set_sequence(seq);
     rec.set_space(space);
     rec.init_operation().set_subscribe(())
   }
@@ -127,20 +133,22 @@ impl Request {
 impl WireMessage for Request {
   fn encode<B: MessageBuilder>(&self, message: &mut B) {
     match &self.operation {
-      &Operation::Truncate => Self::encode_truncate(message, &self.space),
-      &Operation::Read { ref key } => Self::encode_read(message, &self.space, &key),
-      &Operation::Write { ref key, ref value } => Self::encode_write(message, &self.space, &key, &value),
-      &Operation::Subscribe => Self::encode_subscribe(message, &self.space),
+      &Operation::Truncate => Self::encode_truncate(message, self.sequence, &self.space),
+      &Operation::Read { ref key } => Self::encode_read(message, self.sequence, &self.space, &key),
+      &Operation::Write { ref key, ref value } => Self::encode_write(message, self.sequence, &self.space, &key, &value),
+      &Operation::Subscribe => Self::encode_subscribe(message, self.sequence, &self.space),
     }
   }
 
   fn decode<R: MessageReader>(message: &R) -> Result<Self, YakError> {
     let msg = try!(message.get_root::<client_request::Reader>());
     let space = try!(msg.get_space()).into();
+    let seq = msg.get_sequence();
     let op = try!(msg.get_operation());
     match try!(op.which()) {
       operation::Truncate(()) => {
         Ok(Request {
+          sequence: seq,
           space: space,
           operation: Operation::Truncate,
         })
@@ -148,6 +156,7 @@ impl WireMessage for Request {
       operation::Read(v) => {
         let v = try!(v);
         Ok(Request {
+          sequence: seq,
           space: space,
           operation: Operation::Read {
             key: try!(v.get_key()).into(),
@@ -157,6 +166,7 @@ impl WireMessage for Request {
       operation::Write(v) => {
         let v = try!(v);
         Ok(Request {
+          sequence: seq,
           space: space,
           operation: Operation::Write {
             key: try!(v.get_key()).into(),
@@ -166,6 +176,7 @@ impl WireMessage for Request {
       },
       operation::Subscribe(()) => {
         Ok(Request {
+          sequence: seq,
           space: space,
           operation: Operation::Subscribe,
         })
@@ -298,10 +309,29 @@ impl<S: io::Read+io::Write> WireProtocol<S> {
   }
 }
 
+struct SeqCtr(AtomicUsize);
+
+impl SeqCtr {
+  fn new() -> SeqCtr {
+    SeqCtr(AtomicUsize::new(0))
+  }
+  fn next(&mut self) -> u64 {
+    self.0.fetch_add(1, Ordering::Relaxed) as u64
+  }
+}
+
+impl fmt::Debug for SeqCtr {
+
+  fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    write!(fmt, "SeqCtr{{ approx: {:?} }}", self.0.load(Ordering::Relaxed))
+  }
+}
+
 #[derive(Debug)]
 pub struct Client {
   protocol: WireProtocol<TcpStream>,
   space: String,
+  sequence: SeqCtr,
 }
 
 pub struct Subscription {
@@ -320,11 +350,12 @@ impl Client {
     };
 
     let proto = try!(WireProtocol::connect(addr));
-    Ok(Client { protocol: proto, space: space })
+    let seq = SeqCtr::new();
+    Ok(Client { protocol: proto, space: space, sequence: seq })
   }
 
   pub fn truncate(&mut self) -> Result<(), YakError> {
-    let req = Request::truncate(&self.space);
+    let req = Request::truncate(self.sequence.next(), &self.space);
     try!(self.protocol.send(&req));
     debug!("Waiting for response");
     try!(self.protocol.read::<Response>())
@@ -333,7 +364,7 @@ impl Client {
   }
 
   pub fn write(&mut self, key: &[u8], val: &[u8]) -> Result<(), YakError> {
-    let req = Request::write(&self.space, key, val);
+    let req = Request::write(self.sequence.next(), &self.space, key, val);
     try!(self.protocol.send(&req));
     debug!("Waiting for response");
     try!(self.protocol.read::<Response>())
@@ -342,7 +373,7 @@ impl Client {
   }
 
   pub fn read(&mut self, key: &[u8]) -> Result<Vec<Datum>, YakError> {
-    let req = Request::read(&self.space, key);
+    let req = Request::read(self.sequence.next(), &self.space, key);
     try!(self.protocol.send(&req));
     debug!("Waiting for response");
 
@@ -352,7 +383,7 @@ impl Client {
   }
 
   pub fn subscribe(mut self) -> Result<Subscription, YakError> {
-    let req = Request::subscribe(&self.space);
+    let req = Request::subscribe(self.sequence.next(), &self.space);
     try!(self.protocol.send(&req));
     debug!("Waiting for response");
 
