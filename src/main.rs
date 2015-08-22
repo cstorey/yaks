@@ -3,7 +3,7 @@ extern crate env_logger;
 extern crate yak_client;
 extern crate capnp;
 extern crate log4rs;
-extern crate sqlite3;
+extern crate rusqlite;
 extern crate byteorder;
 #[cfg(test)]
 extern crate quickcheck;

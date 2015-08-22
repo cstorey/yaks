@@ -22,6 +22,9 @@ capnp = "^0.2.0"
 quickcheck = "^0.2.19"
 rand = "*"
 byteorder = "*"
-rust-sqlite = "0.2.0"
+rusqlite = "0.2.0"
+r2d2_sqlite = "*"
+r2d2 = "*"
+
 
 [dev-dependencies]

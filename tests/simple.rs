@@ -35,16 +35,16 @@ fn test_put_read_empty() {
 fn test_put_read_single_value() {
   log_init();
   let (mut head, mut tail) = open_client("test_put_read_single_value");
-  let key = "key";
-  let val = "value";
+  let key = "mykey";
+  let val = "myvalue";
 
   head.truncate().unwrap();
 
   head.write(key.as_bytes(), val.as_bytes()).unwrap();
 
   let resp = tail.read(key.as_bytes()).unwrap();
-  assert_eq!(resp.len(), 1);
-  assert_eq!(resp[0].content, val.as_bytes())
+  let expected_datum = yak_client::Datum { key: vec![], content: val.as_bytes().to_vec() };
+  assert_eq!(resp, vec![expected_datum])
 }
 
 #[test]
