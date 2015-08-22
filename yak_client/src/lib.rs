@@ -23,6 +23,8 @@ fn yak_url_scheme(_scheme: &str) -> SchemeType {
   SchemeType::Relative(0)
 }
 
+pub type SeqNo = u64;
+
 #[derive(Debug)]
 pub enum YakError {
   UrlParseError(url::ParseError),
@@ -67,7 +69,7 @@ pub struct Datum {
 
 #[derive(Debug)]
 pub struct Request {
-  pub sequence: u64,
+  pub sequence: SeqNo,
   pub space: String,
   pub operation: Operation,
 }
@@ -81,23 +83,23 @@ pub enum Operation {
 }
 
 impl Request {
-  fn truncate(seq: u64, space: &str) -> Request {
+  fn truncate(seq: SeqNo, space: &str) -> Request {
     Request { sequence: seq, space: space.to_string(), operation: Operation::Truncate }
   }
 
-  fn read(seq: u64, space: &str, key: &[u8]) -> Request {
+  fn read(seq: SeqNo, space: &str, key: &[u8]) -> Request {
     Request { sequence: seq, space: space.to_string(), operation: Operation::Read { key: key.to_vec() } }
   }
 
-  fn write(seq: u64, space: &str, key: &[u8], value: &[u8]) -> Request {
+  fn write(seq: SeqNo, space: &str, key: &[u8], value: &[u8]) -> Request {
     Request { sequence: seq, space: space.to_string(), operation: Operation::Write { key: key.to_owned(), value: value.to_owned() } }
   }
 
-  fn subscribe(seq: u64, space: &str) -> Request {
+  fn subscribe(seq: SeqNo, space: &str) -> Request {
     Request { sequence: seq, space: space.to_string(), operation: Operation::Subscribe }
   }
 
-  fn encode_truncate<B: MessageBuilder>(message: &mut B, seq: u64, space: &str) {
+  fn encode_truncate<B: MessageBuilder>(message: &mut B, seq: SeqNo, space: &str) {
     let mut rec = message.init_root::<client_request::Builder>();
     rec.set_sequence(seq);
     rec.set_space(space);
@@ -105,7 +107,7 @@ impl Request {
     op.set_truncate(())
   }
 
-  fn encode_write<B: MessageBuilder>(message: &mut B, seq: u64, space: &str, key: &[u8], val: &[u8]) {
+  fn encode_write<B: MessageBuilder>(message: &mut B, seq: SeqNo, space: &str, key: &[u8], val: &[u8]) {
     let mut rec = message.init_root::<client_request::Builder>();
     rec.set_sequence(seq);
     rec.set_space(space);
@@ -114,7 +116,7 @@ impl Request {
     req.set_value(val);
   }
 
-  fn encode_read<B: MessageBuilder>(message: &mut B, seq: u64, space: &str, key: &[u8]) {
+  fn encode_read<B: MessageBuilder>(message: &mut B, seq: SeqNo, space: &str, key: &[u8]) {
     let mut rec = message.init_root::<client_request::Builder>();
     rec.set_sequence(seq);
     rec.set_space(space);
@@ -122,7 +124,7 @@ impl Request {
     req.set_key(key)
   }
 
-  fn encode_subscribe<B: MessageBuilder>(message: &mut B, seq: u64, space: &str) {
+  fn encode_subscribe<B: MessageBuilder>(message: &mut B, seq: SeqNo, space: &str) {
     let mut rec = message.init_root::<client_request::Builder>();
     rec.set_sequence(seq);
     rec.set_space(space);
@@ -187,22 +189,22 @@ impl WireMessage for Request {
 
 #[derive(Debug)]
 pub enum Response {
-  Okay,
-  OkayData(Vec<Datum>),
+  Okay(SeqNo),
+  OkayData(SeqNo, Vec<Datum>),
   Delivery(Datum),
 }
 
 impl Response {
-  pub fn expect_ok(&self) -> Result<(), YakError> {
+  pub fn expect_ok(&self) -> Result<SeqNo, YakError> {
     match self {
-      &Response::Okay => Ok(()),
+      &Response::Okay(seq) => Ok(seq),
       &_ => Err(YakError::ProtocolError)
     }
   }
 
-  pub fn expect_datum_list(&self) -> Result<Vec<Datum>, YakError> {
+  pub fn expect_datum_list(&self) -> Result<(SeqNo, Vec<Datum>), YakError> {
     match self {
-      &Response::OkayData(ref result) => Ok(result.clone()),
+      &Response::OkayData(seq, ref result) => Ok((seq, result.clone())),
       &_ => Err(YakError::ProtocolError)
     }
   }
@@ -219,8 +221,9 @@ impl WireMessage for Response {
   fn encode<B: MessageBuilder>(&self, message: &mut B) {
     let mut response = message.init_root::<client_response::Builder>();
     match self {
-      &Response::Okay => response.set_ok(()),
-      &Response::OkayData(ref val) => {
+      &Response::Okay(seq) => { response.set_sequence(seq); response.set_ok(()) },
+      &Response::OkayData(seq, ref val) => {
+        response.set_sequence(seq);
         let mut data = response.init_ok_data(val.len() as u32);
         for i in 0..val.len() {
           let mut datum = data.borrow().get(i as u32);
@@ -238,7 +241,7 @@ impl WireMessage for Response {
   fn decode<R: MessageReader>(message: &R) -> Result<Self, YakError> {
     let msg = try!(message.get_root::<client_response::Reader>());
     match try!(msg.which()) {
-      client_response::Ok(()) => Ok(Response::Okay),
+      client_response::Ok(()) => Ok(Response::Okay(msg.get_sequence())),
       client_response::OkData(d) => {
         debug!("Got response Data: ");
         let mut data = Vec::with_capacity(try!(d).len() as usize);
@@ -246,7 +249,7 @@ impl WireMessage for Response {
           let val : Vec<u8> = try!(it.get_value()).iter().map(|v|v.clone()).collect();
           data.push(Datum { key: vec![], content: val });
         }
-        Ok(Response::OkayData(data))
+        Ok(Response::OkayData(msg.get_sequence(), data))
       },
       client_response::Delivery(d) => {
         let d = try!(d);
@@ -361,34 +364,39 @@ impl Client {
     try!(self.protocol.read::<Response>())
       .map(|r| r.expect_ok())
       .unwrap_or(Err(YakError::ProtocolError))
+      .map(|_| ())
   }
 
   pub fn write(&mut self, key: &[u8], val: &[u8]) -> Result<(), YakError> {
     let req = Request::write(self.sequence.next(), &self.space, key, val);
     try!(self.protocol.send(&req));
-    debug!("Waiting for response");
+    trace!("Waiting for response: {:?}", req);
+
     try!(self.protocol.read::<Response>())
       .map(|r| r.expect_ok())
       .unwrap_or(Err(YakError::ProtocolError))
+      .map(|_| ())
   }
 
   pub fn read(&mut self, key: &[u8]) -> Result<Vec<Datum>, YakError> {
     let req = Request::read(self.sequence.next(), &self.space, key);
     try!(self.protocol.send(&req));
-    debug!("Waiting for response");
+    trace!("Waiting for response: {:?}", req);
 
     try!(self.protocol.read::<Response>())
       .map(|r| r.expect_datum_list())
       .unwrap_or(Err(YakError::ProtocolError))
+      .map(|(_seq, data)| data)
   }
 
   pub fn subscribe(mut self) -> Result<Subscription, YakError> {
     let req = Request::subscribe(self.sequence.next(), &self.space);
     try!(self.protocol.send(&req));
-    debug!("Waiting for response");
+    trace!("Waiting for response: {:?}", req);
 
     let resp = try!(self.protocol.read::<Response>());
-    let _ : () = try!(resp.map(|r| r.expect_ok()).unwrap_or(Err(YakError::ProtocolError)));
+    let resp_seq = try!(resp.map(|r| r.expect_ok()).unwrap_or(Err(YakError::ProtocolError)));
+    trace!("Got response: {:?}", resp_seq);
     Ok(Subscription { protocol: self.protocol })
   }
 }
@@ -399,7 +407,7 @@ impl Subscription {
     let next = try!(self.protocol.read::<Response>());
     let next = try!(next.map(Ok).unwrap_or(Err(YakError::ProtocolError)));
     match next {
-      Response::Okay => Ok(None),
+      Response::Okay(_) => Ok(None),
       Response::Delivery(d) => Ok(Some(d)),
       _ => Err(YakError::ProtocolError),
     }

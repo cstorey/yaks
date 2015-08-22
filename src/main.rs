@@ -20,7 +20,7 @@ use std::clone::Clone;
 use std::error::Error;
 use std::path::Path;
 
-use yak_client::{WireProtocol,Request,Response,Operation,Datum,YakError};
+use yak_client::{WireProtocol,Request,Response,Operation,Datum,SeqNo,YakError};
 
 #[macro_use] mod store;
 mod mem_store;
@@ -189,18 +189,18 @@ impl<Id: fmt::Display, S: Read+Write, ST:store::Store> Session<Id, S, ST> {
 
     let resp = match msg.operation {
       Operation::Truncate => {
-        let resp = try!(self.truncate(&msg.space));
+        let resp = try!(self.truncate(msg.sequence, &msg.space));
         try!(self.send_downstream_or(&msg, resp))
       },
         Operation::Write { ref key, ref value } => {
-          let resp = try!(self.write(&msg.space, &key, &value));
+          let resp = try!(self.write(msg.sequence, &msg.space, &key, &value));
           try!(self.send_downstream_or(&msg, resp))
         },
         Operation::Read { key } =>
-          try!(self.read(&msg.space, &key)),
+          try!(self.read(msg.sequence, &msg.space, &key)),
       Operation::Subscribe => {
-        try!(self.subscribe(&msg.space));
-        Response::Okay
+        try!(self.subscribe(msg.sequence, &msg.space));
+        Response::Okay(msg.sequence)
       },
     };
 
@@ -217,26 +217,26 @@ impl<Id: fmt::Display, S: Read+Write, ST:store::Store> Session<Id, S, ST> {
     }
   }
 
-  fn truncate(&self, space: &str) -> Result<Response, ServerError> {
+  fn truncate(&self, seq: SeqNo, space: &str) -> Result<Response, ServerError> {
     trace!("{}/{:?}: truncate", self.id, space);
     try_box!(self.store.truncate(space));
-    Ok(Response::Okay)
+    Ok(Response::Okay(seq))
   }
 
-  fn read(&self, space: &str, key: &[u8]) -> Result<Response, ServerError> {
+  fn read(&self, seq: SeqNo, space: &str, key: &[u8]) -> Result<Response, ServerError> {
     let val = try_box!(self.store.read(space, key));
     trace!("{}/{:?}: read:{:?}: -> {:?}", self.id, space, key, val);
     let data = val.iter().map(|c| Datum { key: Vec::new(), content: c.clone() }).collect();
-    Ok(Response::OkayData(data))
+    Ok(Response::OkayData(seq, data))
   }
 
-  fn write(&self, space: &str, key: &[u8], val: &[u8]) -> Result<Response, ServerError> {
+  fn write(&self, seq: SeqNo, space: &str, key: &[u8], val: &[u8]) -> Result<Response, ServerError> {
     trace!("{}/{:?}: write:{:?} -> {:?}", self.id, space, key, val);
     try_box!(self.store.write(space, key, val));
-    Ok(Response::Okay)
+    Ok(Response::Okay(seq))
   }
-  fn subscribe(&mut self, space: &str) -> Result<(), ServerError> {
-    try!(self.protocol.send(&Response::Okay));
+  fn subscribe(&mut self, seq: SeqNo, space: &str) -> Result<(), ServerError> {
+    try!(self.protocol.send(&Response::Okay(seq)));
     for d in try_box!(self.store.subscribe(space)) {
       try!(self.protocol.send(&Response::Delivery(d)));
     }

@@ -184,6 +184,10 @@ impl SqliteIterator {
         trace!("Nothing found: @{:?}; waiting", self);
         let mut seq = lock.lock().unwrap();
         trace!("Current seq: {:?}; db seq: {:?};", self.next_idx, *seq);
+        // This assumption gets invalidated when we truncate the database; we 
+        // need to invalidate existing iterators on truncate; or disallow
+        // truncate when iterators are open.
+        // First thought: epoch counter?
         while self.next_idx > *seq {
           trace!("Wait! want next-idx:{:?} > current:{:?}", &*seq, self.next_idx);
           let (lockp, _no_timeout) = cvar.wait_timeout_ms(seq, 1000).unwrap();
