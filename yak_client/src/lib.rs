@@ -13,7 +13,7 @@ use std::fmt;
 use std::error::Error;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use capnp::serialize_packed;
-use capnp::{MessageBuilder, MessageReader, MallocMessageBuilder, ReaderOptions};
+use capnp::message::{Builder, Allocator, Reader, ReaderSegments, ReaderOptions};
 
 use url::{Url,SchemeType,UrlParser};
 
@@ -99,7 +99,7 @@ impl Request {
     Request { sequence: seq, space: space.to_string(), operation: Operation::Subscribe }
   }
 
-  fn encode_truncate<B: MessageBuilder>(message: &mut B, seq: SeqNo, space: &str) {
+  fn encode_truncate<A: Allocator>(message: &mut Builder<A>, seq: SeqNo, space: &str) {
     let mut rec = message.init_root::<client_request::Builder>();
     rec.set_sequence(seq);
     rec.set_space(space);
@@ -107,7 +107,7 @@ impl Request {
     op.set_truncate(())
   }
 
-  fn encode_write<B: MessageBuilder>(message: &mut B, seq: SeqNo, space: &str, key: &[u8], val: &[u8]) {
+  fn encode_write<A: Allocator>(message: &mut Builder<A>, seq: SeqNo, space: &str, key: &[u8], val: &[u8]) {
     let mut rec = message.init_root::<client_request::Builder>();
     rec.set_sequence(seq);
     rec.set_space(space);
@@ -116,7 +116,7 @@ impl Request {
     req.set_value(val);
   }
 
-  fn encode_read<B: MessageBuilder>(message: &mut B, seq: SeqNo, space: &str, key: &[u8]) {
+  fn encode_read<A: Allocator>(message: &mut Builder<A>, seq: SeqNo, space: &str, key: &[u8]) {
     let mut rec = message.init_root::<client_request::Builder>();
     rec.set_sequence(seq);
     rec.set_space(space);
@@ -124,7 +124,7 @@ impl Request {
     req.set_key(key)
   }
 
-  fn encode_subscribe<B: MessageBuilder>(message: &mut B, seq: SeqNo, space: &str) {
+  fn encode_subscribe<A: Allocator>(message: &mut Builder<A>, seq: SeqNo, space: &str) {
     let mut rec = message.init_root::<client_request::Builder>();
     rec.set_sequence(seq);
     rec.set_space(space);
@@ -133,7 +133,7 @@ impl Request {
 }
 
 impl WireMessage for Request {
-  fn encode<B: MessageBuilder>(&self, message: &mut B) {
+  fn encode<A: Allocator>(&self, message: &mut Builder<A>) {
     match &self.operation {
       &Operation::Truncate => Self::encode_truncate(message, self.sequence, &self.space),
       &Operation::Read { ref key } => Self::encode_read(message, self.sequence, &self.space, &key),
@@ -142,7 +142,7 @@ impl WireMessage for Request {
     }
   }
 
-  fn decode<R: MessageReader>(message: &R) -> Result<Self, YakError> {
+  fn decode<S: ReaderSegments>(message: &Reader<S>) -> Result<Self, YakError> {
     let msg = try!(message.get_root::<client_request::Reader>());
     let space = try!(msg.get_space()).into();
     let seq = msg.get_sequence();
@@ -218,7 +218,7 @@ impl Response {
 }
 
 impl WireMessage for Response {
-  fn encode<B: MessageBuilder>(&self, message: &mut B) {
+  fn encode<A: Allocator>(&self, message: &mut Builder<A>) {
     let mut response = message.init_root::<client_response::Builder>();
     match self {
       &Response::Okay(seq) => { response.set_sequence(seq); response.set_ok(()) },
@@ -238,7 +238,7 @@ impl WireMessage for Response {
     }
   }
 
-  fn decode<R: MessageReader>(message: &R) -> Result<Self, YakError> {
+  fn decode<S: ReaderSegments> (message: &Reader<S>) -> Result<Self, YakError> {
     let msg = try!(message.get_root::<client_response::Reader>());
     match try!(msg.which()) {
       client_response::Ok(()) => Ok(Response::Okay(msg.get_sequence())),
@@ -268,8 +268,8 @@ pub struct WireProtocol<S: io::Read+io::Write> {
 }
 
 pub trait WireMessage {
-  fn encode<B: MessageBuilder>(&self, message: &mut B);
-  fn decode<R: MessageReader>(message: &R) -> Result<Self, YakError>;
+  fn encode<A: Allocator>(&self, message: &mut Builder<A>);
+  fn decode<S: ReaderSegments>(message: &Reader<S>) -> Result<Self, YakError>;
 }
 
 impl WireProtocol<TcpStream> {
@@ -288,7 +288,7 @@ impl<S: io::Read+io::Write> WireProtocol<S> {
 
   pub fn send<M : WireMessage + fmt::Debug>(&mut self, req: &M) -> Result<(), YakError> {
     trace!("Send: {:?}", req);
-    let mut message = MallocMessageBuilder::new_default();
+    let mut message = Builder::new_default();
     req.encode(&mut message);
     try!(serialize_packed::write_message(&mut self.connection, &mut message));
     try!(self.connection.flush());

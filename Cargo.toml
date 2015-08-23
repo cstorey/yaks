@@ -7,9 +7,6 @@ authors = ["cez"]
 name = "yak_server"
 path = "src/main.rs"
 
-[build-dependencies]
-capnpc = "^0.2.0"
-
 [dependencies.yak_client]
 path = "./yak_client"
 
@@ -18,7 +15,7 @@ url = "0.2.34"
 log = "^0.3"
 log4rs = "^0.3.3"
 env_logger = "^0.3"
-capnp = "^0.2.0"
+capnp = "^0.4.3"
 quickcheck = "^0.2.19"
 rand = "*"
 byteorder = "*"

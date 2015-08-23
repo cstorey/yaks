@@ -8,11 +8,11 @@ build = "build.rs"
 name = "yak_client"
 
 [build-dependencies]
-capnpc = "^0.2.0"
+capnpc = "0.4.3"
 
 [dependencies]
 url = "0.2.34"
 log = "^0.3"
 env_logger = "^0.3"
-capnp = "^0.2.0"
+capnp = "^0.4.3"
 bufstream = "0.1.1"
