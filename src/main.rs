@@ -23,7 +23,6 @@ use std::path::Path;
 use yak_client::{WireProtocol,Request,Response,Operation,Datum,SeqNo,YakError};
 
 #[macro_use] mod store;
-mod mem_store;
 mod sqlite_store;
 
 macro_rules! try_box {
