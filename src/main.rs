@@ -194,10 +194,6 @@ impl<Id: fmt::Display, S: Read+Write, ST:store::Store> Session<Id, S, ST> {
     trace!("{}: Handle message: {:x}", self.id, ptr_addr(&msg));
 
     let resp = match msg.operation {
-      Operation::Truncate => {
-        let resp = try!(self.truncate(msg.sequence, &msg.space));
-        try!(self.send_downstream_or(&msg, resp))
-      },
         Operation::Write { ref key, ref value } => {
           let resp = try!(self.write(msg.sequence, &msg.space, &key, &value));
           try!(self.send_downstream_or(&msg, resp))
@@ -221,12 +217,6 @@ impl<Id: fmt::Display, S: Read+Write, ST:store::Store> Session<Id, S, ST> {
       Some(ref d) => d.handle(msg),
       None => Ok(default),
     }
-  }
-
-  fn truncate(&self, seq: SeqNo, space: &str) -> Result<Response, ServerError> {
-    trace!("{}/{:?}: truncate", self.id, space);
-    try_box!(self.store.truncate(space));
-    Ok(Response::Okay(seq))
   }
 
   fn read(&self, seq: SeqNo, space: &str, key: &[u8]) -> Result<Response, ServerError> {

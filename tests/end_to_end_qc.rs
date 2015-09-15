@@ -3,6 +3,7 @@ extern crate log;
 extern crate env_logger;
 extern crate yak_client;
 extern crate quickcheck;
+extern crate log4rs;
 
 use std::collections::HashMap;
 use yak_client::YakError;
@@ -17,7 +18,6 @@ fn test_put_read_values_qc() {
     env_logger::init().unwrap_or(());
 
     let (mut head, mut tail) = open_client("test_put_read_single_value_qc");
-    try!(head.truncate());
     info!("Kvs: {:?}", kvs);
     let mut expected = HashMap::new();
     for &(ref key, ref val) in &kvs {

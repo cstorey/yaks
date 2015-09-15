@@ -11,7 +11,6 @@ pub type Values = Vec<Val>;
 pub trait Store : Clone {
   type Iter: Iterator<Item=Datum>;
   type Error: Error + Any + Send + 'static;
-  fn truncate(&self, space: &str) -> Result<(), Self::Error>;
   fn read(&self, space: &str, key: &[u8]) -> Result<Values, Self::Error>;
   fn write(&self, space: &str, key: &[u8], val: &[u8]) -> Result<(), Self::Error>;
   fn subscribe(&self, space: &str) -> Result<Self::Iter, Self::Error> ;
@@ -152,33 +151,6 @@ pub mod test {
       debug!("Ok?     : {:?}", kvs == actual);
       Ok(kvs == actual)
     }
-
-    fn test_put_truncate_read_values_qc(kvs: Vec<(Vec<u8>, Vec<u8>)>, needle_sel: usize) -> Result<TestResult, BoxedError> {
-      log_init();
-      let store = Self::build();
-
-      let space = "X";
-      for &(ref key, ref val) in &kvs {
-        trace!("Write val: {:?}/{:?}={:?}", &space, &key, &val);
-        try_as_any!(store.write(&space, &key, &val));
-        trace!("Wrote val: {:?}/{:?}={:?}", &space, &key, &val);
-      }
-
-      try_as_any!(store.truncate(&space));
-
-      if kvs.len() > 0 {
-        let (ref needle, _) = kvs[needle_sel % kvs.len()];
-        trace!("Needle: {:?}", needle);
-
-        trace!("Reading: {:?}/{:?}", &space, &needle);
-        let actual : Vec<_> = try_as_any!(store.read(&space, &needle));
-        debug!("Got     : {:?}", actual);
-        debug!("Ok?     : {:?}", actual.len() == 0);
-        Ok(TestResult::from_bool(actual.len() == 0))
-      } else {
-        Ok(TestResult::discard())
-      }
-    }
   }
 
   macro_rules! build_store_tests {
@@ -201,11 +173,6 @@ pub mod test {
       #[test]
       fn test_put_async_subscribe_values_qc() {
         ::quickcheck::quickcheck($t::test_put_async_subscribe_values_qc as fn(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<bool, Box<::std::any::Any+Send>>)
-      }
-
-      #[test]
-      fn test_put_truncate_read_values_qc() {
-        ::quickcheck::quickcheck($t::test_put_truncate_read_values_qc as fn (kvs: Vec<(Vec<u8>, Vec<u8>)>, needle_sel: usize) -> Result<TestResult, Box<::std::any::Any+Send>>)
       }
     }
   }

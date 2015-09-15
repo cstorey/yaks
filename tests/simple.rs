@@ -25,8 +25,6 @@ fn test_put_read_empty() {
   let (mut head, mut tail) = open_client("test_put_read_empty");
   let key = "key";
 
-  head.truncate().unwrap();
-
   let resp = tail.read(key.as_bytes()).unwrap();
   assert_eq!(resp.len(), 0);
 }
@@ -37,8 +35,6 @@ fn test_put_read_single_value() {
   let (mut head, mut tail) = open_client("test_put_read_single_value");
   let key = "mykey";
   let val = "myvalue";
-
-  head.truncate().unwrap();
 
   head.write(key.as_bytes(), val.as_bytes()).unwrap();
 
@@ -54,8 +50,6 @@ fn test_put_read_two_values() {
   let key = "key";
   let vals = vec!["a".as_bytes(), "b".as_bytes()];
 
-  head.truncate().unwrap();
-
   for val in &vals {
     head.write(key.as_bytes(), &val).unwrap();
   }
@@ -66,28 +60,12 @@ fn test_put_read_two_values() {
 }
 
 #[test]
-fn test_truncate() {
-  log_init();
-  let (mut head, mut tail) = open_client("test_truncate");
-  let key = "key";
-  let val = "value";
-
-  head.truncate().unwrap();
-  head.write(key.as_bytes(), val.as_bytes()).unwrap();
-  head.truncate().unwrap();
-
-  let resp = tail.read(key.as_bytes()).unwrap();
-  assert_eq!(resp.len(), 0);
-}
-
-#[test]
 fn test_subscribe_after_put_single_value() {
   static TEST_NAME: &'static str = "test_subscribe_after_put_single_value";
   log_init();
   let (mut head, tail) = open_client(TEST_NAME);
   let key = b"key";
   let val = b"value";
-  head.truncate().unwrap();
   head.write(key, val).unwrap();
 
   let mut subscription = tail.subscribe().unwrap();
@@ -103,7 +81,6 @@ fn test_subscribe_async_deliveries() {
   let (mut head, tail) = open_client(TEST_NAME);
   let key = b"key";
   let val = b"value";
-  head.truncate().unwrap();
 
   let barrier = Arc::new(Barrier::new(2));
 

@@ -33,7 +33,6 @@ fn bench_simple_write(b: &mut Bencher) {
   env_logger::init().unwrap_or(());
 
   let (mut head, mut tail) = open_client("bench_simple_put");
-  head.truncate().unwrap();
   let key = "foo";
   let val = "bar";
 
@@ -45,7 +44,6 @@ fn bench_simple_read(b: &mut Bencher) {
   env_logger::init().unwrap_or(());
 
   let (mut head, mut tail) = open_client("bench_simple_put");
-  head.truncate().unwrap();
   let key = "foo";
   let val = "bar";
   head.write(key.as_bytes(), val.as_bytes()).unwrap();
