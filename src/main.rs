@@ -120,7 +120,7 @@ fn do_run() -> Result<(), ServerError> {
     let _ = try!(thread::Builder::new().name(format!("C{}", peer)).spawn(move || {
 	debug!("Accept stream from {:?}", peer);
         match Session::new(peer, sock, store, next).process_requests() {
-          Err(e) => report_errors(&e),
+          Err(e) => report_session_errors(&e),
           _ => ()
         }
       }));
@@ -128,8 +128,8 @@ fn do_run() -> Result<(), ServerError> {
   Ok(())
 }
 
-fn report_errors(error: &Error) {
-  error!("Error: {}", error);
+fn report_session_errors(error: &Error) {
+  error!("Session failed with: {}", error);
   while let Some(error) = error.cause() {
     error!("\tCaused by: {}", error);
   }
@@ -145,13 +145,20 @@ impl DownStream<TcpStream> {
   }
 
 }
+
+
+fn ptr_addr<T>(obj:&T) -> usize {
+  return obj as *const T as usize;
+}
+
 impl<S: Read+Write> DownStream<S> {
   fn handle(&self, msg: &Request) -> Result<Response, ServerError> {
     let mut wire = self.protocol.lock().unwrap();
-    trace!("Downstream: -> {:?}", msg);
+    debug!("Downstream: -> {:x}", ptr_addr(&msg));
     try!(wire.send(msg));
+    debug!("Downstream wait:  {:x}", ptr_addr(&msg));
     let resp = try!(wire.read::<Response>());
-    trace!("Downstream: <- {:?}", resp);
+    debug!("Downstream: <- {:x}", ptr_addr(&resp));
     resp.map(Ok).unwrap_or(Err(ServerError::DownstreamError(YakError::ProtocolError)))
   }
 }
@@ -184,7 +191,7 @@ impl<Id: fmt::Display, S: Read+Write, ST:store::Store> Session<Id, S, ST> {
   }
 
   fn process_one(&mut self, msg: Request) -> Result<(), ServerError> {
-    trace!("{}: Handle message: {:?}", self.id, msg);
+    trace!("{}: Handle message: {:x}", self.id, ptr_addr(&msg));
 
     let resp = match msg.operation {
       Operation::Truncate => {
